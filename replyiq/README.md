@@ -1,6 +1,6 @@
 # ReplyIQ (app)
 
-This is a Next.js 16 and TypeScript app built on graph8's API and sandbox, with **Gemini** as the AI model.
+This is a Next.js 16 and TypeScript app built on graph8's API and sandbox, with **OpenAI** as the AI model.
 
 - The build guide is [../IMPLEMENTATION.md](../IMPLEMENTATION.md).
 - The product plan is [../REPLYIQ-PLAN.md](../REPLYIQ-PLAN.md).
@@ -13,9 +13,9 @@ Create `.env.local` in this folder. It is gitignored, so never commit it:
 ```
 G8_API_BASE=https://be.graph8.com/api/v1
 G8_API_KEY=                          # graph8 SANDBOX PERSONAL key (Profile -> Developer)
-GEMINI_API_KEY=                      # Google AI Studio key
-GEMINI_CLASSIFY_MODEL=gemini-3.5-flash-lite
-GEMINI_REASON_MODEL=gemini-3.8-flash
+OPENAI_API_KEY=                      # OpenAI platform key
+OPENAI_CLASSIFY_MODEL=gpt-6-luna
+OPENAI_REASON_MODEL=gpt-6-sol
 ENABLE_LAUNCH=false                  # stays off until a sandbox mailbox exists
 MIN_GROUP_SIZE=2
 ```

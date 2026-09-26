@@ -11,9 +11,9 @@ const boolish = z
 const schema = z.object({
   G8_API_BASE: z.url().default("https://be.graph8.com/api/v1"),
   G8_API_KEY: z.string().min(1, "G8_API_KEY is missing (use a sandbox personal key)"),
-  GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY is missing"),
-  GEMINI_CLASSIFY_MODEL: z.string().default("gemini-3.5-flash-lite"),
-  GEMINI_REASON_MODEL: z.string().default("gemini-3.8-flash"),
+  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is missing"),
+  OPENAI_CLASSIFY_MODEL: z.string().default("gpt-6-luna"),
+  OPENAI_REASON_MODEL: z.string().default("gpt-6-sol"),
   ENABLE_LAUNCH: boolish,
   MIN_GROUP_SIZE: z.coerce.number().int().min(1).default(2),
 });
@@ -37,7 +37,7 @@ export function getEnv(): Env {
 export function envStatus() {
   return {
     g8Key: Boolean(process.env.G8_API_KEY),
-    geminiKey: Boolean(process.env.GEMINI_API_KEY),
+    openaiKey: Boolean(process.env.OPENAI_API_KEY),
     launchEnabled: ["true", "1"].includes(process.env.ENABLE_LAUNCH ?? ""),
   };
 }

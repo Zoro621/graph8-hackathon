@@ -39,7 +39,7 @@ export default function Home() {
 
       <section className="flex flex-wrap gap-2" aria-label="Environment">
         <Pill ok={status.g8Key} label="graph8 key" />
-        <Pill ok={status.geminiKey} label="Gemini key" />
+        <Pill ok={status.openaiKey} label="OpenAI key" />
         <Pill ok={status.launchEnabled} label={status.launchEnabled ? "Launch on" : "Launch off (flagged)"} />
       </section>
 
