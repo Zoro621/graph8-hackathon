@@ -1,6 +1,7 @@
-// Run the ReplyIQ pipeline from the terminal (M2: load -> fetch -> classify -> themes).
-// Usage: npm run run:cli -- [--campaign <id> | --sequence <id>] [--limit <n>]
+// Run the ReplyIQ pipeline from the terminal: load -> fetch -> classify -> themes -> tag -> resolve.
+// Usage: npm run run:cli -- [--campaign <id> | --sequence <id>] [--limit <n>] [--no-tag]
 //        (no selector = the source with the most replies, discovered at runtime)
+//        --no-tag: do not write ReplyIQ tags to graph8 (read-only run)
 import "./load-env";
 import { getEnv } from "../lib/env";
 import { describeError, g8 } from "../lib/g8";
@@ -21,6 +22,7 @@ async function main() {
   const campaignId = arg("--campaign");
   const sequenceId = arg("--sequence");
   const limit = arg("--limit") ? Number(arg("--limit")) : undefined;
+  const writeTags = !process.argv.includes("--no-tag");
 
   let selector: SourceSelector | null = campaignId ? { campaignId } : sequenceId ? { sequenceId } : null;
   if (!selector) {
@@ -30,24 +32,48 @@ async function main() {
   }
 
   const run = await runPipeline(
-    { g8: client, llm: llm(), store: createFileStore(), classifyModel: env.OPENAI_CLASSIFY_MODEL, themeModel: env.OPENAI_REASON_MODEL, log: (m) => console.log(m) },
-    { selector, limit },
+    {
+      g8: client,
+      llm: llm(),
+      store: createFileStore(),
+      classifyModel: env.OPENAI_CLASSIFY_MODEL,
+      themeModel: env.OPENAI_REASON_MODEL,
+      log: (m) => console.log(m),
+    },
+    { selector, limit, writeTags },
   );
 
   console.log(`\nRun ${run.id}  status=${run.status}  source="${run.source.name}"`);
   console.log(`steps: ${Object.entries(run.steps).map(([k, v]) => `${k}=${v}`).join(" ")}`);
-  console.log(`threads=${run.counts.threads} replies=${run.counts.prospectReplies} needsReview=${run.counts.needsReview} llmCalls=${run.usage.llmCalls} tokens=${run.usage.inputTokens}+${run.usage.outputTokens}`);
+  console.log(
+    `threads=${run.counts.threads} replies=${run.counts.prospectReplies} needsReview=${run.counts.needsReview} llmCalls=${run.usage.llmCalls} tokens=${run.usage.inputTokens}+${run.usage.outputTokens}`,
+  );
   for (const g of run.groups) {
     const info = categoryInfo(g.key);
-    console.log(`\n■ ${g.label} (${g.replies.length})  follow-up: ${info.followUp}${info.answerCard ? "  [Answer Card]" : ""}`);
+    console.log(`\n■ ${g.label} (${g.replies.length})  follow-up: ${info.followUp}${info.answerCard ? "  [Answer Card]" : ""}  eligible: ${g.eligible.length}`);
+    const reasons: Record<string, number> = {};
+    for (const e of g.excluded) reasons[e.reason] = (reasons[e.reason] ?? 0) + 1;
+    if (Object.keys(reasons).length) console.log(`   excluded: ${Object.entries(reasons).map(([k, v]) => `${k}=${v}`).join(" ")}`);
     for (const th of g.themes ?? []) {
       console.log(`   ◆ ${th.label} (${th.threadIds.length})  "${th.quote.slice(0, 70)}"${th.quoteVerified ? "" : "  [quote unverified]"}`);
     }
     for (const r of g.replies) {
-      const extra = [r.referredName && `→ ${r.referredName}`, r.revisitHint && `⟳ ${r.revisitHint}`, r.needsReview && "⚠ review"].filter(Boolean).join("  ");
+      const extra = [
+        r.referredName && `→ ${r.referredName}`,
+        r.revisitHint && `⟳ ${r.revisitHint}`,
+        r.needsReview && "⚠ review",
+        r.tag && `#${r.tag.status}`,
+      ]
+        .filter(Boolean)
+        .join("  ");
       console.log(`   ${r.confidence.toFixed(2)}  ${(r.company ?? r.contactEmail).slice(0, 24).padEnd(24)} "${r.quote.replace(/\s+/g, " ").slice(0, 80)}"  ${extra}`);
     }
   }
+  if (run.tagging) {
+    const t = run.tagging;
+    console.log(`\ngraph8 tags: tagged=${t.tagged} already=${t.already} failed=${t.failed} created=[${t.tagsCreated.join(", ")}] staleKept=${t.staleKept}`);
+  }
+  if (run.audience) console.log(`audience: eligible=${run.audience.eligible} excluded=${JSON.stringify(run.audience.excluded)}`);
   if (run.errors.length) console.log(`\nnotes:\n  ${run.errors.join("\n  ")}`);
   console.log(`\nSaved: data/runs/${run.id}.json`);
   process.exit(run.status === "done" ? 0 : 1);

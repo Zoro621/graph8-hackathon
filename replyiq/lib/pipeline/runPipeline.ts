@@ -1,14 +1,15 @@
-// Orchestrates a run. M2 covers load -> fetch -> classify -> themes; tag/resolve/cards stay "pending" until
-// M3/M4 plug in. Every step's state and any error is persisted, and the function never throws for
+// Orchestrates a run: load -> fetch -> classify -> themes -> tag -> resolve (cards: M4). Every step's state and any error is persisted, and the function never throws for
 // a pipeline failure: the run file is the source of truth (the UI polls it).
 import type { G8Client } from "../g8";
-import { describeError } from "../g8";
+import { describeError, WriteNotAllowedError } from "../g8";
 import type { Llm } from "../llm";
 import type { RunStore } from "../store";
 import type { Run, StepName } from "../types";
 import { classifyReplies } from "./classify";
 import { groupReplies } from "./group";
 import { discoverThemes } from "./themes";
+import { resolveContacts } from "./resolveContacts";
+import { tagThreads } from "./tagThreads";
 import { fetchSourceReplies, resolveSource, type SourceSelector } from "./sources";
 
 export interface PipelineDeps {
@@ -25,6 +26,8 @@ export interface PipelineOptions {
   selector: SourceSelector;
   runId?: string;
   limit?: number; // cap replies (testing / cost control)
+  /** Write ReplyIQ tags to graph8 threads (M3). Off unless asked: library callers opt in explicitly. */
+  writeTags?: boolean;
 }
 
 export function emptyRun(id: string, selector: SourceSelector, now: Date): Run {
@@ -132,6 +135,36 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
       run.steps.themes = "failed";
       run.errors.push(`themes: ${describeError(err)}`);
     }
+
+    // Tag threads in graph8 (writes). Non-critical: failures are recorded, the run continues.
+    if (!opts.writeTags) {
+      run.steps.tag = "skipped";
+    } else {
+      run.steps.tag = "running";
+      await persist();
+      log("▶ tag");
+      try {
+        const res = await tagThreads(deps.g8, run.groups);
+        run.groups = res.groups;
+        run.tagging = { tagged: res.tagged, already: res.already, failed: res.failed, tagsCreated: res.tagsCreated, staleKept: res.staleKept };
+        run.errors.push(...res.warnings.map((w) => `tag: ${w}`));
+        const total = res.tagged + res.already + res.failed;
+        run.steps.tag = total > 0 && res.failed === total ? "failed" : "done";
+        log(`  tagged ${res.tagged}, already ${res.already}, failed ${res.failed}`);
+      } catch (err) {
+        run.steps.tag = err instanceof WriteNotAllowedError ? "skipped" : "failed";
+        run.errors.push(`tag: ${describeError(err)}`);
+      }
+    }
+
+    // Who may get a follow-up campaign. Critical for safety: a failure fails the run.
+    await step("resolve", async () => {
+      const res = await resolveContacts(deps.g8, run.groups);
+      run.groups = res.groups;
+      run.audience = { eligible: res.eligible, excluded: res.excluded };
+      run.errors.push(...res.warnings.map((w) => `resolve: ${w}`));
+      log(`  eligible ${res.eligible}, excluded ${JSON.stringify(res.excluded)}`);
+    });
 
     run.status = "done";
   } catch {

@@ -8,6 +8,35 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M3 results (26 Sep, verified live and in graph8's UI)
+- **Tagging** (`lib/pipeline/tagThreads.ts`): each reply gets its category tag in graph8 (`ReplyIQ · Referral`, …).
+  - Only the categories present are created. Existing tags are reused by name; the create response has no ID, so the list is re-read.
+  - Tagging is idempotent on graph8's side (verified), and threads that already carry the tag are skipped.
+  - Tags are created with `ai_can_apply: false`, so graph8's auto-tagger never applies them.
+  - Per-thread failures are recorded and never stop the others.
+  - Writes check the write policy first.
+  - The pipeline only tags when asked (`writeTags`). The CLI tags by default; `--no-tag` makes it read-only.
+- **graph8 limitation found:** `/inbox/channels/*` (the only tag-removal endpoint) returns 404 for these threads; it can't see them. If a re-run moves a reply to another category, the old ReplyIQ tag is kept and reported (`staleKept`); removal is attempted in case it works on real threads. The probe tag was renamed into the real "ReplyIQ · Out of office" tag on the matching demo thread, so nothing was deleted.
+- **Audience** (`lib/pipeline/resolveContacts.ts`) fails closed. Precedence:
+  1. hard no / unsubscribe in this thread
+  2. **hard stop elsewhere** (the same contact, by ID or email, said no in any thread of the run)
+  3. not found
+  4. **suppression unknown** (the check failed, so never contact)
+  5. suppressed (on any channel)
+  6. no follow-up category (meeting booked, meeting request, needs review)
+  
+  Everyone else is eligible, deduped per group. Suppression is checked once per contact.
+- **Acceptance run on the graph8 Tech SMB Sales campaign:** 19 of 19 threads tagged (0 failed); created "Meeting booked" and "Referral". Audience: 16 eligible, excluded hard no 1 and no-follow-up 2.
+- **Verified in graph8's own Inbox:** all 9 ReplyIQ tags appear in the tag filter, and filtering by "ReplyIQ · Referral" shows exactly the 7 SMB referral threads, each with the badge.
+- **Inbox Analytics stays at 0 replies.** It doesn't count the seeded threads at all, tagged or not; its event rollup is unavailable (`rollup_available: false` in campaign metrics). **The demo beat uses the Inbox tag filter instead.**
+- **Classifier definitions sharpened** after live flakes:
+  - out of office = any away notice, return date optional (a bare "Out of office" was sometimes "other")
+  - a dead-address notice listing only generic support or sales inboxes is "needs review", not a referral
+  
+  The SMB campaign is identical across 4 runs; the classifier live tests pass 4 out of 4.
+- **Referral note for M5:** referral contacts are eligible, but the follow-up should go to the **named person** (`referredName`, looked up on approval), not to the person who left.
+- **Tests:** 130 offline (tagging, resolve rules including hard-stop-everywhere and fail-closed suppression, pipeline with and without writes) and 19 live, including a **write test** on the synthetic `[DEMO]` sequence: tag it, read every thread back from graph8, then re-run to prove idempotency.
+
 ## Themes inside groups (26 Sep)
 - **The 13 categories still decide every action.** A new **themes** step (`lib/pipeline/themes.ts`, `gpt-6-sol`) finds the finer patterns inside each group with 2 or more replies. The AI names them itself; nothing is hardcoded. Example: "per-seat cost too high" vs "locked into an annual contract" inside a price objection.
 - **Grounded and non-critical:**

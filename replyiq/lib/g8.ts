@@ -263,10 +263,30 @@ export function createG8Client(opts: G8ClientOptions) {
     },
 
     /** Guarded write: checks the policy first, then sends. */
-    async write<T>(method: "POST" | "PUT" | "PATCH", path: string, body: unknown, idempotencyKey?: string) {
+    async write<T>(
+      method: "POST" | "PUT" | "PATCH" | "DELETE",
+      path: string,
+      body?: unknown,
+      idempotencyKey?: string,
+      query?: Record<string, unknown>,
+    ) {
       await client.assertWriteAllowed();
-      return (await call<Envelope<T>>(path, { method, body, idempotencyKey }))?.data;
+      return (await call<Envelope<T>>(path, { method, body, idempotencyKey, query }))?.data;
     },
+
+    // ---------- inbox tag writes (all guarded by write()) ----------
+    /** Create an inbox tag. The response carries no id, so callers re-read listInboxTags(). */
+    createInboxTag: (name: string, description: string) =>
+      client.write("POST", "/inbox/tags", { name, description, ai_can_apply: false }, `replyiq-tag:${name}`),
+    /** Attach tags to an email thread. Idempotent on graph8's side (verified 26 Sep). */
+    tagThread: (threadId: string, tagIds: string[]) =>
+      client.write<{ tagged?: boolean; tag_count?: number }>("POST", `/inbox/${encodeURIComponent(threadId)}/tag`, { tag_ids: tagIds }, undefined, { channel: "email" }),
+    /**
+     * Take a tag off an email thread. NOTE: observed 26 Sep that /inbox/channels/* returns 404 for
+     * seeded threads (it cannot see them), so callers must treat failure as non-fatal.
+     */
+    untagThread: (threadId: string, tagId: string) =>
+      client.write("DELETE", `/inbox/channels/${encodeURIComponent(threadId)}/tags`, undefined, undefined, { tag_id: tagId, channel_type: "email" }),
 
     // ---------- sequences ----------
     async listSequences(): Promise<SequenceListItem[]> {

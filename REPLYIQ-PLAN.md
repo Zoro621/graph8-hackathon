@@ -224,7 +224,7 @@ replyiq/
 | Time | Beat |
 |---|---|
 | 0:00 | **Problem:** graph8's Inbox Analytics shows the Interested %, and every other reply dead-ends. |
-| 0:40 | Run ReplyIQ on the graph8 team's real **Tech SMB Sales** campaign (2,212 sent, 19 replies). The replies are grouped with counts and quotes: out of office with return dates, "left, contact X" referrals, a booked meeting graph8's metrics missed. Refresh Inbox Analytics: it goes from **0 tagged** to our categories, inside graph8's own UI. |
+| 0:40 | Run ReplyIQ on the graph8 team's real **Tech SMB Sales** campaign (2,212 sent, 19 replies). The replies are grouped with counts and quotes: out of office with return dates, "left, contact X" referrals, a booked meeting graph8's metrics missed. Then open graph8's own Inbox and filter by "ReplyIQ · Referral": exactly those threads, each carrying the ReplyIQ badge. (graph8's Inbox Analytics doesn't count the seeded threads, so it isn't used.) |
 | 1:40 | **Price Answer Card:** proof we have (cited from the Proof Catalog), the ⚠ proof gap ("no ROI case study for mid-market"), and how to answer. |
 | 2:40 | Open the draft follow-up campaign in Studio. Show the approval screen (V1→V2, exclusions, cost), then **Approve → sandbox launch → outbox**. |
 | 3:40 | **Learning loop:** the Answer Card is now in the campaign's objection doc, and the next generation uses it. |

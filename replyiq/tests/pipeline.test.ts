@@ -40,6 +40,8 @@ function fakeOrg(threads: Thread[], overrides: Partial<Record<keyof G8Client, un
     getSequence: async (id: string) => ({ id, name: "Seq A", status: "paused", associated_list_id: 100 }),
     getSequenceChannels: async () => [{ channel_value: "a@example.com" }],
     listThreads: async () => threads,
+    findContactByEmail: async () => null,
+    getSuppression: async (id: number) => ({ contact_id: id, is_suppressed: false, active_channels: [], suppressions: [] }),
     ...overrides,
   } as unknown as G8Client;
 }
@@ -64,7 +66,69 @@ afterEach(async () => {
 const categoryFor = (text: string) =>
   /office|pto/i.test(text) ? "out_of_office" : /remove/i.test(text) ? "unsubscribe" : /price|pricing/i.test(text) ? "pricing_request" : "hard_no";
 
-describe("runPipeline (integration: sources + fetch + classify + themes + store)", () => {
+describe("runPipeline (integration: sources + fetch + classify + themes + tag + resolve + store)", () => {
+  const distinctContacts = (list: Thread[]) => list.map((t, i) => ({ ...t, contact: { ...t.contact, id: 100 + i } }));
+
+  it("with writeTags: tags every thread in graph8 and resolves the audience", async () => {
+    const threads = distinctContacts([thread("t1", "Out of office until June 9"), thread("t2", "Please remove me"), thread("t3", "What is the pricing?")]);
+    const tagged: string[] = [];
+    const created: string[] = [];
+    const tags: { id: string; name: string }[] = [];
+    const org = fakeOrg(threads, {
+      assertWriteAllowed: async () => ({ allowed: true, via: "sandbox", orgId: "org_test" }),
+      listInboxTags: async () => tags,
+      createInboxTag: async (name: string) => {
+        created.push(name);
+        tags.push({ id: `tag-${tags.length}`, name });
+      },
+      tagThread: async (id: string) => {
+        tagged.push(id);
+        return { tagged: true };
+      },
+      untagThread: async () => undefined,
+    });
+    const { llm } = fakeLlm((items) => items.map((i) => label(i.id, categoryFor(i.latest_prospect_reply), i.latest_prospect_reply)));
+    const run = await runPipeline({ g8: org, llm, store: createFileStore(dir), classifyModel: "m" }, { selector: { campaignId: "c1" }, writeTags: true });
+    expect(run.status).toBe("done");
+    expect(run.steps).toMatchObject({ tag: "done", resolve: "done" });
+    expect(tagged.sort()).toEqual(["t1", "t2", "t3"]);
+    expect(created.sort()).toEqual(["ReplyIQ · Out of office", "ReplyIQ · Pricing request", "ReplyIQ · Unsubscribe"]);
+    expect(run.tagging).toMatchObject({ tagged: 3, already: 0, failed: 0 });
+    expect(run.audience).toEqual({ eligible: 2, excluded: { unsubscribe: 1 } });
+    expect(run.groups.flatMap((g) => g.replies).every((r) => r.tag?.status === "tagged")).toBe(true);
+  });
+
+  it("writeTags but writes not allowed: tag step skipped, nothing written, run still done", async () => {
+    const { WriteNotAllowedError } = await import("../lib/g8");
+    let writes = 0;
+    const org = fakeOrg(distinctContacts([thread("t1", "Out of office")]), {
+      assertWriteAllowed: async () => {
+        throw new WriteNotAllowedError("not sandbox");
+      },
+      tagThread: async () => void writes++,
+      createInboxTag: async () => void writes++,
+    });
+    const { llm } = fakeLlm((items) => items.map((i) => label(i.id, "out_of_office", i.latest_prospect_reply)));
+    const run = await runPipeline({ g8: org, llm, store: createFileStore(dir), classifyModel: "m" }, { selector: { campaignId: "c1" }, writeTags: true });
+    expect(run.status).toBe("done");
+    expect(run.steps.tag).toBe("skipped");
+    expect(writes).toBe(0);
+    expect(run.errors.join()).toMatch(/tag: .*not sandbox/);
+  });
+
+  it("a resolve failure (graph8 down) fails the run: no audience without a safety check", async () => {
+    const org = fakeOrg([thread("t1", "What is the pricing?")], {
+      getSuppression: async () => Promise.reject(new Error("503")),
+      findContactByEmail: async () => Promise.reject(new Error("503")),
+    });
+    const { llm } = fakeLlm((items) => items.map((i) => label(i.id, "pricing_request", i.latest_prospect_reply)));
+    const run = await runPipeline({ g8: org, llm, store: createFileStore(dir), classifyModel: "m" }, { selector: { campaignId: "c1" } });
+    // suppression failures are per-contact and fail closed (not a crash): contact excluded, run done
+    expect(run.status).toBe("done");
+    expect(run.groups[0].eligible).toEqual([]);
+    expect(run.groups[0].excluded[0].reason).toBe("suppression_unknown");
+  });
+
   it("a theme failure never fails the run", async () => {
     const threads = [thread("t1", "Out of office until June 9"), thread("t2", "Out on PTO")];
     const { llm } = fakeLlm((items) => items.map((i) => label(i.id, "out_of_office", i.latest_prospect_reply)), {
@@ -96,7 +160,18 @@ describe("runPipeline (integration: sources + fetch + classify + themes + store)
     const run = await runPipeline({ g8: fakeOrg(threads), llm, store, classifyModel: "m" }, { selector: { campaignId: "c1" } });
 
     expect(run.status).toBe("done");
-    expect(run.steps).toEqual({ load: "done", fetch: "done", classify: "done", themes: "done", tag: "pending", resolve: "pending", cards: "pending" });
+    expect(run.steps).toEqual({ load: "done", fetch: "done", classify: "done", themes: "done", tag: "skipped", resolve: "done", cards: "pending" });
+    // resolve: hard stop (unsubscribe) excluded; pricing + OOO eligible (all share contact 7 -> deduped per group)
+    const unsub = run.groups.find((g) => g.key === "unsubscribe")!;
+    expect(unsub.eligible).toEqual([]);
+    expect(unsub.excluded[0].reason).toBe("unsubscribe");
+    // contact 7 unsubscribed in one thread -> hard stop wins everywhere
+    for (const g of run.groups.filter((x) => x.key !== "unsubscribe")) {
+      expect(g.eligible).toEqual([]);
+      expect(g.excluded.every((e) => e.reason === "hard_stop_elsewhere")).toBe(true);
+    }
+    expect(run.audience?.eligible).toBe(0);
+    expect(run.tagging).toBeUndefined(); // writeTags not requested
     expect(run.orgId).toBe("org_test");
     expect(run.source).toMatchObject({ name: "SMB Campaign", campaignId: "c1", audienceListId: 100, mailboxes: ["a@example.com"], docs: ["objections"] });
     expect(run.counts).toEqual({ threads: 4, prospectReplies: 4, needsReview: 0 });

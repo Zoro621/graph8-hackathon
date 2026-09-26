@@ -11,7 +11,7 @@ import { norm } from "../../lib/pipeline/classify";
 import { runPipeline } from "../../lib/pipeline/runPipeline";
 import { discoverSources, pickDefaultSource } from "../../lib/pipeline/sources";
 import { createFileStore } from "../../lib/store";
-import { CATEGORY_KEYS, REVIEW_THRESHOLD } from "../../lib/taxonomy";
+import { allowsFollowUpCampaign, CATEGORY_KEYS, isHardStop, REVIEW_THRESHOLD } from "../../lib/taxonomy";
 import type { Run, SourceSummary } from "../../lib/types";
 
 let dir: string;
@@ -66,7 +66,30 @@ function assertRunInvariants(run: Run) {
       for (const id of t.threadIds) expect(g.replies.find((r) => r.threadId === id)?.themeId).toBe(t.id);
     }
   }
+  // resolve: every reply accounted for; hard stops and non-follow-up categories never eligible
+  expect(run.steps.resolve).toBe("done");
+  expect(run.steps.tag).toBe("skipped"); // read-only tests never write
+  const allReplies = run.groups.flatMap((g) => g.replies);
+  for (const g of run.groups) {
+    const accounted = new Set([...g.eligible.map((e) => e.threadId), ...g.excluded.map((e) => e.threadId)]);
+    const dupes = g.replies.length - accounted.size; // same contact twice in one group is deduped
+    expect(dupes).toBeGreaterThanOrEqual(0);
+    for (const e of g.eligible) {
+      const r = allReplies.find((x) => x.threadId === e.threadId)!;
+      expect(isHardStop(r.category)).toBe(false);
+      expect(allowsFollowUpCampaign(r.category)).toBe(true);
+    }
+  }
   expect(writes).toBe(0);
+}
+
+/** Re-check graph8's suppression ledger for eligible contacts (independent of the pipeline). */
+async function recheckSuppression(run: Run) {
+  const ids = [...new Set(run.groups.flatMap((g) => g.eligible.map((e) => e.contactId)))].slice(0, 8);
+  for (const id of ids) {
+    const s = await client.getSuppression(id);
+    expect(s.is_suppressed, `contact ${id} is suppressed but was eligible`).toBe(false);
+  }
 }
 
 describe("LIVE pipeline (graph8 + OpenAI)", () => {
@@ -84,6 +107,7 @@ describe("LIVE pipeline (graph8 + OpenAI)", () => {
     expect(run.groups.length).toBeGreaterThan(1);
     // saved file matches
     expect(await createFileStore(dir).load(run.id)).toEqual(run);
+    await recheckSuppression(run);
   });
 
   it("runs every other source with replies, selected by sequence", async () => {

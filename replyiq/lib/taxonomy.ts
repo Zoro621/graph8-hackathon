@@ -76,7 +76,7 @@ export const CATEGORIES: readonly CategoryInfo[] = [
   {
     key: "referral_wrong_person",
     label: "Referral",
-    definition: "Wrong person, or the contact has left/retired, AND the reply points to ANYONE else to contact instead: a named person, a role or team (\"my manager\", \"their team leaders\"), or a replacement email address. Put the person's name (or the role) in referred_name.",
+    definition: "Wrong person, or the contact has left/retired, AND the reply points to ANYONE else to contact instead: a named person, a role or team (\"my manager\", \"their team leaders\"), or a replacement email address for this person. Generic company inboxes (support@, sales@, info@) listed by a dead-address notice do NOT count. Put the person's name (or the role) in referred_name.",
     followUp: "yes",
     answerCard: false,
     angle: "Intro to the person they named",
@@ -92,7 +92,7 @@ export const CATEGORIES: readonly CategoryInfo[] = [
   {
     key: "out_of_office",
     label: "Out of office",
-    definition: "An automatic reply saying the person OR the office is away or closed and will respond on return (vacation, PTO, travel, holiday, office closed until a day). Put the return date or period in revisit_hint.",
+    definition: "An out-of-office / away notice: the person OR the office is away or closed (vacation, PTO, travel, holiday, office closed), usually automatic. A bare \"out of office\" counts; a return date is optional. Put the return date or period, if any, in revisit_hint.",
     followUp: "later",
     answerCard: false,
   },
@@ -113,7 +113,7 @@ export const CATEGORIES: readonly CategoryInfo[] = [
   {
     key: "other",
     label: "Needs review",
-    definition: "Anything else: bounce or invalid address, left the company pointing to NO one (no name, role or address), a generic auto-acknowledgement that mentions no absence, placeholder text, or unclear.",
+    definition: "Anything else: bounce or invalid / no-longer-in-service address (even if it lists generic support or sales inboxes), left the company pointing to NO one (no name, role or address), a generic auto-acknowledgement that mentions no absence, placeholder text, or unclear.",
     followUp: "never",
     answerCard: false,
   },

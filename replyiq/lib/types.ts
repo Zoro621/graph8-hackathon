@@ -41,6 +41,7 @@ export interface Classified extends Reply {
   reason?: string; // one-line why, for the UI
   context?: "full" | "composed" | "truncated"; // what the classifier saw (lib/pipeline/compose.ts)
   themeId?: string; // theme inside its group (lib/pipeline/themes.ts)
+  tag?: { id: string; name: string; status: "tagged" | "already" | "failed"; error?: string }; // graph8 inbox tag (M3)
   needsReview: boolean;
 }
 
@@ -75,14 +76,21 @@ export interface AnswerCard {
   emailAngle: string;
 }
 
-export type ExclusionReason = "hard_no" | "unsubscribe" | "suppressed" | "not_found" | "no_followup_category";
+export type ExclusionReason =
+  | "hard_no" // said no in this thread
+  | "unsubscribe" // asked to be removed in this thread
+  | "hard_stop_elsewhere" // the same contact said no / unsubscribe in another thread: wins everywhere
+  | "suppressed" // on graph8's suppression ledger
+  | "suppression_unknown" // the suppression check failed: fail closed, never contact
+  | "not_found" // no graph8 contact for this reply
+  | "no_followup_category"; // meeting booked / meeting request / needs review
 
 export interface Group {
   key: Category;
   label: string;
   replies: Classified[];
-  eligible: { contactId: number; email: string }[];
-  excluded: { email: string; reason: ExclusionReason }[];
+  eligible: { contactId: number; email: string; threadId: string }[]; // may get a follow-up campaign (M5)
+  excluded: { email: string; reason: ExclusionReason; threadId: string; contactId?: number }[];
   themes?: Theme[]; // only for groups with 2+ replies; absent if theme discovery failed
   card?: AnswerCard;
   draft?: {
@@ -119,6 +127,10 @@ export interface Run {
   steps: Record<StepName, StepState>;
   counts: { threads: number; prospectReplies: number; needsReview: number };
   usage: { inputTokens: number; outputTokens: number; llmCalls: number };
+  /** M3 graph8 inbox tagging summary (absent until the tag step runs). */
+  tagging?: { tagged: number; already: number; failed: number; tagsCreated: string[]; staleKept: number };
+  /** M3 contact resolution summary. */
+  audience?: { eligible: number; excluded: Partial<Record<ExclusionReason, number>> };
   groups: Group[];
   errors: string[];
 }
