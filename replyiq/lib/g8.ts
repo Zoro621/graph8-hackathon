@@ -120,6 +120,29 @@ export interface CampaignDocument {
   meta_data?: { content?: string };
 }
 
+/** POST /campaigns body (field limits from the docs: name 255, category 100, persona 200, goal 255). */
+export interface CampaignCreateBody {
+  name: string;
+  category?: string;
+  brief?: string;
+  core_concept?: string;
+  primary_hook?: string;
+  target_persona?: string;
+  goal?: string;
+  audience_list_id?: string;
+  target_channels?: string[];
+  auto_generate_documents?: boolean;
+}
+
+export interface CampaignCreated {
+  id: string;
+  name?: string;
+  status?: string; // "copy_in_progress" when generating, else "draft"
+  generation_status?: string; // in_progress | skipped | failed_to_dispatch
+  total_documents?: number;
+  audience_list_id?: string;
+}
+
 export interface CampaignListItem {
   id: string;
   name: string;
@@ -389,6 +412,50 @@ export function createG8Client(opts: G8ClientOptions) {
       const data = await get<Record<string, unknown>[]>("/global-context/documents", { include_content: true });
       return (data ?? []).map(toStudioDoc);
     },
+
+    // ---------- M5: lists + draft campaigns (writes guarded by write()) ----------
+    createList: (title: string, description: string, idempotencyKey?: string) =>
+      client.write<{ id: number; title: string; total?: number }>("POST", "/lists", { title, type: "contacts", description }, idempotencyKey),
+
+    /**
+     * Add contacts to a list. On 409 CONFLICT_REVIEW_REQUIRED (contacts graph8 warns about, e.g.
+     * already in other outreach) retry with skip_all: warned contacts are left out, never forced in.
+     */
+    async addContactsToList(listId: number, contactIds: number[]): Promise<{ conflictSkipped: boolean; detail?: unknown }> {
+      try {
+        await client.write("POST", `/lists/${listId}/contacts`, { contact_ids: contactIds });
+        return { conflictSkipped: false };
+      } catch (err) {
+        if (!(err instanceof G8Error && err.status === 409)) throw err;
+        await client.write("POST", `/lists/${listId}/contacts`, { contact_ids: contactIds, conflict_resolution: "skip_all" });
+        return { conflictSkipped: true, detail: err.detail };
+      }
+    },
+    async listContactsOfList(listId: number): Promise<{ id: number | null; work_email: string | null }[]> {
+      const out: { id: number | null; work_email: string | null }[] = [];
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const { data, pagination } = await getPage<{ id: number | null; work_email: string | null }>(`/lists/${listId}/contacts`, { page, limit: 100 });
+        out.push(...data);
+        if (!pagination?.has_next || data.length === 0) break;
+      }
+      return out;
+    },
+    /** CRM contact search (free). `name` matches first OR last name, partially: filter exactly yourself. */
+    async searchContacts(q: { name?: string; company_name?: string; limit?: number }): Promise<ContactListItem[]> {
+      const { data } = await getPage<ContactListItem>("/contacts", { ...q, limit: q.limit ?? 25 });
+      return data;
+    },
+    createCampaign: (body: CampaignCreateBody, idempotencyKey?: string) =>
+      client.write<CampaignCreated>("POST", "/campaigns", body, idempotencyKey),
+    getCampaign: (id: string) => get<{ id: string; name: string; status: string | null; documents?: { id: string; name?: string; type?: string }[] }>(`/campaigns/${encodeURIComponent(id)}`),
+    async listCampaignDocs(id: string): Promise<CampaignDocument[]> {
+      const data = await get<{ documents?: CampaignDocument[] } | CampaignDocument[]>(`/campaigns/${encodeURIComponent(id)}/documents`);
+      return Array.isArray(data) ? data : (data?.documents ?? []);
+    },
+    getCampaignDoc: (id: string, docId: string) =>
+      get<CampaignDocument>(`/campaigns/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`),
+    updateCampaignDoc: (id: string, docId: string, content: string) =>
+      client.write<CampaignDocument>("PUT", `/campaigns/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, { content }),
 
     // ---------- Studio campaigns ----------
     async listCampaigns(): Promise<CampaignListItem[]> {

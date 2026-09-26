@@ -189,6 +189,42 @@ describe("listThreads", () => {
   });
 });
 
+describe("M5 writes", () => {
+  const allowed = { "GET /sandbox/status": () => json({ data: { sandbox: true, environment: "sandbox", org_id: "o" } }) };
+
+  it("adding contacts retries a 409 conflict with skip_all (never add_all)", async () => {
+    const bodies: unknown[] = [];
+    const { c } = client({
+      ...allowed,
+      "POST /lists/7/contacts": (_u, init) => {
+        const body = JSON.parse(String(init.body));
+        bodies.push(body);
+        return body.conflict_resolution ? json({ data: { added: 1 } }) : json({ detail: { code: "CONFLICT_REVIEW_REQUIRED" } }, 409);
+      },
+    });
+    const res = await c.addContactsToList(7, [1, 2]);
+    expect(res.conflictSkipped).toBe(true);
+    expect(bodies).toEqual([{ contact_ids: [1, 2] }, { contact_ids: [1, 2], conflict_resolution: "skip_all" }]);
+  });
+
+  it("other list errors are not swallowed", async () => {
+    const { c } = client({ ...allowed, "POST /lists/7/contacts": () => json({ detail: "bad" }, 400) });
+    await expect(c.addContactsToList(7, [1])).rejects.toBeInstanceOf(G8Error);
+  });
+
+  it("creates lists and campaigns with the idempotency key, only when writes are allowed", async () => {
+    const keys: string[] = [];
+    const { c } = client({
+      ...allowed,
+      "POST /lists": (_u, init) => (keys.push(new Headers(init.headers).get("idempotency-key") ?? ""), json({ data: { id: 5, title: "t" } }, 201)),
+      "POST /campaigns": (_u, init) => (keys.push(new Headers(init.headers).get("idempotency-key") ?? ""), json({ data: { id: "camp", status: "copy_in_progress" } })),
+    });
+    expect((await c.createList("t", "d", "k-list"))?.id).toBe(5);
+    expect((await c.createCampaign({ name: "n" }, "k-camp"))?.id).toBe("camp");
+    expect(keys).toEqual(["k-list", "k-camp"]);
+  });
+});
+
 describe("Studio campaign readers", () => {
   it("reads the full campaign and metrics with the requested window", async () => {
     let days = "";

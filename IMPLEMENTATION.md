@@ -8,6 +8,27 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M5 results (26 Sep, verified live in graph8)
+- **Draft a follow-up campaign for one group of a saved run** (`lib/pipeline/draftCampaign.ts`, `npm run draft`). It runs on demand only, because Studio's document generation spends credits. **Nothing is sent or launched.**
+  1. **Audience:** the group's eligible contacts. For **referrals, the named people** are looked up in the CRM with a free search: exact full-name match at the same company, and ambiguous matches are skipped. The person who left is never targeted. Roles ("their team leaders") and bare emails are reported, not guessed.
+  2. **Re-check right before adding anyone:** hard stops (a no in any thread) and suppression are verified again. It fails closed, and there's a minimum audience (`MIN_GROUP_SIZE`).
+  3. **List:** `POST /lists` with an idempotency key, then add contacts. On a 409 conflict it retries with `skip_all`: warned contacts are left out, never forced in.
+  4. **Campaign:** `POST /campaigns` with `auto_generate_documents`. Name, category and field lengths follow the API limits. The hook, concept, goal and persona come from `gpt-6-sol`, with a deterministic fallback. **The brief is assembled by code from grounded data**: verbatim quotes (deduped), verified proof with sources, the proof gap as a "do NOT claim" rule, themes, referral note, timing advice.
+  5. **Documents:** it waits until Studio finishes each one. Observed statuses are `generating`, `completed` and `failed`, and both completed and failed count as finished. Then:
+     - completed Messaging & Objections / Reply Templates get the Answer Card appended
+     - documents **Studio failed to generate** get ReplyIQ's grounded section written into them, including a failed Campaign Brief
+     - documents still generating are left alone and reported; `--patch-only` patches them later
+     - sections carry a marker so re-runs never duplicate; `--refresh-docs` replaces only ReplyIQ's own section
+  6. Every stage is saved on the run. Re-runs reuse the list and campaign (saved IDs plus idempotency keys); `--force` makes a new campaign.
+- **graph8 finding:** for new campaigns in this org, **Studio's generator marks 7 of 9 documents `failed`**: brief, messaging & objections, targeting, email prompt, emails, reply templates, snippets. It still charges credits for them (8,997 available; the company profile is set). This is graph8-side; ReplyIQ fills the documents it owns so the drafts stay useful.
+- **Live acceptance:**
+  - `[DEMO]` pricing request: list 2 (the right 2 contacts) and campaign `affb690d…`. Messaging & Objections now holds the Answer Card with 4 verified proof points and the proof gap; Reply Templates and the brief are filled too. Read back from graph8.
+  - SMB out of office: list 3 (9 contacts) and campaign `a1d334db…`, with timing advice listing every return date.
+  - SMB referral: **stopped before any write.** None of the 6 named people are in the CRM (an enrichment lookup would cost credits and needs approval); the 2 replies that didn't name a person are reported.
+- **Tests:**
+  - 164 offline: happy path; failed, generating and completed documents; patch-only reuse; no duplicates; hard-stop and suppression re-check; minimum audience with no writes; refusals and unsafe writes; referral targeting; 409 `skip_all`; idempotency keys; section upsert and refresh; brief grounding; field fallback and limits
+  - 21 live, including a read-only check of every recorded draft against graph8 (campaign exists, list attached with the audience, no hard-stop contact in the list, documents carry ReplyIQ's section)
+
 ## M4 results (26 Sep, verified live)
 - **Answer Cards** (`lib/pipeline/cards.ts`, `gpt-6-sol`): one per objection or interest group (interested, pricing, price objection, not now, competitor, no need). Hard stops never get a card. Each card has:
   - summary and verbatim quotes

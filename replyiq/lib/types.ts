@@ -96,13 +96,28 @@ export interface Group {
   excluded: { email: string; reason: ExclusionReason; threadId: string; contactId?: number }[];
   themes?: Theme[]; // only for groups with 2+ replies; absent if theme discovery failed
   card?: AnswerCard;
-  draft?: {
-    listId: number;
-    campaignId: string;
-    docsPatched: string[];
-    status: "drafting" | "ready" | "failed";
-    error?: string;
-  };
+  draft?: CampaignDraft;
+}
+
+/** M5: a follow-up campaign drafted in graph8 Studio for one group. Nothing is sent or launched. */
+export interface CampaignDraft {
+  status: "drafting" | "ready" | "failed";
+  listId?: number;
+  listTitle?: string;
+  campaignId?: string;
+  campaignName?: string;
+  /** Who the campaign targets. For referrals: the NAMED people (referredBy = who pointed to them). */
+  audience: { contactId: number; email: string; threadId: string; referredBy?: string }[];
+  audienceNotes: string[]; // e.g. referred people not found in the CRM, contacts graph8 warned about
+  docsPatched: string[]; // campaign doc file types that now carry the ReplyIQ Answer Card / notes
+  docsPending: string[]; // docs still generating when we stopped waiting (patch later)
+  docsFailed: string[]; // docs graph8 Studio failed to generate (ReplyIQ fills the ones it owns)
+  generation: "complete" | "in_progress" | "unknown";
+  timingNote?: string; // advisory: when to launch (e.g. after OOO return dates)
+  warnings: string[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type StepName = "load" | "fetch" | "classify" | "themes" | "tag" | "resolve" | "cards";

@@ -8,7 +8,7 @@ const milestones = [
   ["M2", "Fetch + classify replies", true],
   ["M3", "Tag threads + contact guards", true],
   ["M4", "Answer Cards (grounded)", true],
-  ["M5", "Draft follow-up campaign", false],
+  ["M5", "Draft follow-up campaign", true],
   ["M6", "UI", false],
   ["M7", "Hardening + public repo", false],
 ] as const;
