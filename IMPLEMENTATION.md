@@ -8,7 +8,29 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
-## M2 results (26 Sep, verified live)
+## Thread context update (26 Sep)
+- **The classifier sees the entire conversation.** Every message, oldest first, with quoted history stripped. There's no message-count or per-message limit. This fixed a real loss: the 9-message SPARXiQ thread used to drop our original pitch.
+- **Threads over 12,000 characters go through a composer** (`lib/pipeline/compose.ts`):
+  - An LLM pass reads the whole thread, in 60k-character chunks if huge, and writes a digest of every intent-relevant event. Each event carries a verbatim quote.
+  - The code keeps only events whose quote is really in the thread (at least 3 words), and drops an unsupported "current state".
+  - The classifier then gets our first message verbatim + the verified digest + the latest messages verbatim, within 12k characters.
+  - If nothing verifies, it falls back to the first message + the newest messages, and adds a warning.
+  - Each reply records `context: full | composed | truncated`.
+- **Batches are packed by count (20) and total size (120k characters).**
+- **Fix: labels crossed between threads.** With longer contexts the model once swapped labels between three similar threads. The quote check caught it (all three were flagged for review), and now:
+  - items use short per-batch aliases (R1, R2…) instead of look-alike UUIDs, with the company named and the latest reply first
+  - a label whose quote belongs to another reply in the batch is treated as a swap, and those replies are re-classified one at a time
+- **Fix: unstable borderline labels.** Tightened definitions:
+  - referral = points to *anyone* (a name, a role like "their team leaders", or an address)
+  - out of office = the person or the *office* is away
+  - needs review = points to no one
+  
+  The SMB campaign is now identical across 3 runs (0 of 19 differ): meeting booked 1, referral 7, out of office 9, hard no 1, needs review 1.
+- **Tests:** 95 offline and 17 live, including:
+  - a live composer test with deciding events buried mid-thread (a booked meeting; an unsubscribe with the latest reply just "Ok, thanks.")
+  - a live consistency test (two runs must agree on at least 90%, and hard stops can never flip)
+
+
 - **What it does:** load the source (discovered at runtime) → fetch its replies → classify each into one of 13 categories → group them. It writes nothing to graph8.
 - **Classifier** (`lib/pipeline/classify.ts`, `gpt-6-luna` via `lib/llm.ts`):
   - It reads the whole conversation plus graph8's summary, not just the last message.

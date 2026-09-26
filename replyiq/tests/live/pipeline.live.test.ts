@@ -84,6 +84,21 @@ describe("LIVE pipeline (graph8 + OpenAI)", () => {
     }
   });
 
+  it("labels are consistent: two runs on the same source agree on >= 90% of replies", async () => {
+    const env = getEnv();
+    const selector = pickDefaultSource(sources)!;
+    const deps = { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL };
+    const [a, b] = await Promise.all([runPipeline(deps, { selector }), runPipeline(deps, { selector })]);
+    const cat = (r: Run) => new Map(r.groups.flatMap((g) => g.replies.map((x) => [x.threadId, x.category] as const)));
+    const ca = cat(a);
+    const cb = cat(b);
+    const same = [...ca].filter(([id, c]) => cb.get(id) === c).length;
+    const diffs = [...ca].filter(([id, c]) => cb.get(id) !== c).map(([id, c]) => `${id.slice(0, 8)}: ${c} vs ${cb.get(id)}`);
+    expect(same / ca.size, diffs.join("\n")).toBeGreaterThanOrEqual(0.9);
+    // Hard stops must never flip: a person who asked to stop can't become contactable on a re-run.
+    for (const [id, c] of ca) if (c === "unsubscribe" || c === "hard_no") expect(["unsubscribe", "hard_no"]).toContain(cb.get(id));
+  });
+
   it("fails cleanly (no throw) for a sequence that does not exist", async () => {
     const env = getEnv();
     const run = await runPipeline(

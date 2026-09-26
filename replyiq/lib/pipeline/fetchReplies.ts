@@ -1,10 +1,6 @@
 import type { G8Client, Thread, ThreadMessage } from "../g8";
 import type { Reply } from "../types";
 
-// How much of each thread the classifier sees.
-const CONVERSATION_MESSAGES = 8;
-const CONVERSATION_CHARS = 600;
-
 const time = (m: ThreadMessage) => {
   const t = Date.parse(m.date ?? "");
   return Number.isNaN(t) ? 0 : t;
@@ -77,11 +73,13 @@ export function threadToReply(thread: Thread, sequenceId: string): Reply | null 
     outbound: outbound ? toPlainText(outbound.content) : undefined,
     replyText: stripQuoted(full) || full,
     repliedAt: latest.date ?? undefined,
-    conversation: messages.slice(-CONVERSATION_MESSAGES).map((m) => {
+    // The ENTIRE thread, oldest first. Quoted history is stripped from each message so nothing is
+    // repeated; long threads are handled at classification time (lib/pipeline/compose.ts).
+    conversation: messages.map((m) => {
       const text = toPlainText(m.content);
       return {
         from: m.responder === "OTHER" ? ("prospect" as const) : ("us" as const),
-        text: (stripQuoted(text) || text).slice(0, CONVERSATION_CHARS),
+        text: stripQuoted(text) || text,
         date: m.date ?? undefined,
       };
     }),

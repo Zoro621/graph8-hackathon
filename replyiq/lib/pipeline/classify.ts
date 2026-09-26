@@ -6,12 +6,14 @@
 import { z } from "zod";
 import type { Llm, LlmUsage } from "../llm";
 import { scrubPhones } from "../scrub";
+import { norm } from "../text";
+import { buildThreadContext, THREAD_CHAR_LIMIT, type ThreadContext } from "./compose";
 import { CATEGORIES, CATEGORY_KEYS, REVIEW_THRESHOLD } from "../taxonomy";
 import type { Category, Classified, Reply } from "../types";
 
 export const BATCH_SIZE = 20;
 const CONCURRENCY = 3;
-const MAX_CONVERSATION_CHARS = 2400;
+const BATCH_CHAR_BUDGET = 120_000; // a batch also closes when its threads add up to this much text
 
 const LabelSchema = z.object({
   labels: z.array(
@@ -56,28 +58,49 @@ export function preLabel(r: Reply): Omit<Label, "id"> | null {
   return null;
 }
 
-function toItem(r: Reply) {
-  let convo = r.conversation.map((m) => `${m.from === "us" ? "US" : "PROSPECT"}: ${m.text}`).join("\n---\n");
-  if (convo.length > MAX_CONVERSATION_CHARS) convo = "…" + convo.slice(-MAX_CONVERSATION_CHARS);
+/**
+ * One model input item. `id` is a short per-batch alias (R1, R2…), not the long thread UUID:
+ * near-identical UUIDs made the model swap labels between threads (seen live, 26 Sep).
+ * The latest reply comes first and the company is named, so each item is easy to tell apart.
+ */
+function toItem(alias: string, r: Reply, ctx: ThreadContext) {
   return {
-    id: r.threadId,
+    id: alias,
+    company: r.company ?? null,
+    latest_prospect_reply: scrubPhones(r.replyText.slice(0, 3000)),
     subject: r.subject ?? null,
     graph8_summary: r.summary ?? null,
-    conversation: scrubPhones(convo),
-    latest_prospect_reply: scrubPhones(r.replyText.slice(0, 1500)),
+    context: ctx.mode, // full = entire thread verbatim; composed = verified digest; truncated = first + latest
+    conversation: scrubPhones(ctx.text),
   };
 }
 
-/** Comparison form: case, quote marks, dashes, whitespace, and broken/invisible characters don't matter. */
-export const norm = (s: string) =>
-  s
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[\uFFFD\u200B-\u200D\uFEFF]/g, "") // replacement char (bad encoding), zero-width chars
-    .replace(/["'“”«»„‘’‚`]/g, "") // quote marks: bad encodings often turn them into U+FFFD
-    .replace(/[‐‑‒–—−]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
+/** True when the label's quote is not in its own reply but is verbatim in another reply of the batch. */
+export function isSwapped(own: Reply, quote: string, batch: Reply[]): boolean {
+  const q = norm(quote);
+  if (q.length < 8 || norm(own.replyText).includes(q)) return false;
+  return batch.some((o) => o !== own && norm(o.replyText).includes(q));
+}
+
+/** Pack replies into batches by count and by total context size. */
+export function packBatches<T extends { chars: number }>(items: T[], size: number, charBudget = BATCH_CHAR_BUDGET): T[][] {
+  const batches: T[][] = [];
+  let cur: T[] = [];
+  let chars = 0;
+  for (const it of items) {
+    if (cur.length && (cur.length >= size || chars + it.chars > charBudget)) {
+      batches.push(cur);
+      cur = [];
+      chars = 0;
+    }
+    cur.push(it);
+    chars += it.chars;
+  }
+  if (cur.length) batches.push(cur);
+  return batches;
+}
+
+export { norm };
 
 /** Apply a label to a reply, enforcing the invariants. */
 export function applyLabel(r: Reply, l: Omit<Label, "id">): Classified {
@@ -104,6 +127,8 @@ export function applyLabel(r: Reply, l: Omit<Label, "id">): Classified {
 export interface ClassifyOptions {
   llm: Llm;
   model: string;
+  composeModel?: string; // model for long-thread digests (defaults to model)
+  threadCharLimit?: number; // threads longer than this get a composed digest (default 12,000)
   batchSize?: number;
   concurrency?: number;
   onProgress?: (done: number, total: number) => void;
@@ -113,6 +138,7 @@ export interface ClassifyResult {
   classified: Classified[];
   usage: LlmUsage & { llmCalls: number };
   warnings: string[];
+  contexts: Record<ThreadContext["mode"], number>;
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -130,7 +156,13 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 export async function classifyReplies(replies: Reply[], opts: ClassifyOptions): Promise<ClassifyResult> {
   const usage = { inputTokens: 0, outputTokens: 0, llmCalls: 0 };
+  const addUsage = (u: LlmUsage, calls = 1) => {
+    usage.inputTokens += u.inputTokens;
+    usage.outputTokens += u.outputTokens;
+    usage.llmCalls += calls;
+  };
   const warnings: string[] = [];
+  const contexts = { full: 0, composed: 0, truncated: 0 };
   const result = new Map<string, Classified>();
 
   // Duplicate thread ids would make "exactly one label per id" ambiguous.
@@ -144,62 +176,86 @@ export async function classifyReplies(replies: Reply[], opts: ClassifyOptions): 
     else toModel.push(r);
   }
 
+  // 1) Context per thread: the entire conversation, or a grounded digest when it is over the limit.
+  const concurrency = opts.concurrency ?? CONCURRENCY;
+  const withCtx = await mapLimit(toModel, concurrency, async (r) => {
+    const { ctx, usage: u } = await buildThreadContext(r, {
+      llm: opts.llm,
+      model: opts.composeModel ?? opts.model,
+      limit: opts.threadCharLimit ?? THREAD_CHAR_LIMIT,
+    });
+    if (u.llmCalls) addUsage(u, u.llmCalls);
+    contexts[ctx.mode]++;
+    if (ctx.mode === "truncated") {
+      warnings.push(`thread ${r.threadId.slice(0, 12)} was too long and no digest point could be verified; used first + latest messages`);
+    } else if (ctx.dropped) {
+      warnings.push(`thread ${r.threadId.slice(0, 12)}: ${ctx.dropped} digest point(s) dropped (quote not found in the thread)`);
+    }
+    return { r, ctx, chars: ctx.text.length };
+  });
+  const ctxById = new Map(withCtx.map((x) => [x.r.threadId, x.ctx]));
+
+  /** One model call. Items get short aliases (R1, R2…); labels come back keyed by thread id. */
   const call = async (batch: Reply[]) => {
+    const alias = new Map(batch.map((r, i) => [`R${i + 1}`, r]));
     const { data, usage: u } = await opts.llm.parse({
       model: opts.model,
       system: SYSTEM_PROMPT,
-      user: JSON.stringify({ items: batch.map(toItem) }),
+      user: JSON.stringify({ items: [...alias].map(([a, r]) => toItem(a, r, ctxById.get(r.threadId)!)) }),
       schema: LabelSchema,
       name: "reply_labels",
     });
-    usage.inputTokens += u.inputTokens;
-    usage.outputTokens += u.outputTokens;
-    usage.llmCalls++;
-    return data.labels;
+    addUsage(u);
+    return data.labels.map((l) => ({ ...l, id: alias.get(l.id.trim())?.threadId ?? `unknown:${l.id}` }));
   };
+  const label = (r: Reply, l: Omit<Label, "id">): Classified => ({ ...applyLabel(r, l), context: ctxById.get(r.threadId)?.mode ?? "full" });
 
+  // 2) Classify in batches packed by count and by total size.
   const size = Math.max(1, opts.batchSize ?? BATCH_SIZE);
-  const batches: Reply[][] = [];
-  for (let i = 0; i < toModel.length; i += size) batches.push(toModel.slice(i, i + size));
+  const batches = packBatches(withCtx, size).map((b) => b.map((x) => x.r));
 
   let done = result.size;
   opts.onProgress?.(done, unique.length);
 
-  await mapLimit(batches, opts.concurrency ?? CONCURRENCY, async (batch) => {
+  await mapLimit(batches, concurrency, async (batch) => {
     const byId = new Map(batch.map((r) => [r.threadId, r]));
     const labels = await call(batch); // a failure here fails the step: partial labels would mislead
     const seen = new Set<string>();
+    const swapped = new Set<string>();
     for (const l of labels) {
       const r = byId.get(l.id);
       if (!r) {
-        warnings.push(`model returned an unknown id (${l.id.slice(0, 12)}); ignored`);
+        warnings.push(`model returned an unknown id (${l.id.replace(/^unknown:/, "").slice(0, 12)}); ignored`);
         continue;
       }
       if (seen.has(l.id)) continue; // keep the first label for an id
       seen.add(l.id);
-      result.set(l.id, applyLabel(r, l));
+      // The quote belongs to a different reply in this batch: the model crossed two items.
+      if (batch.length > 1 && isSwapped(r, l.quote, batch)) {
+        swapped.add(l.id);
+        continue;
+      }
+      result.set(l.id, label(r, l));
     }
-    // Retry the ones the model skipped, one at a time; then fall back to "other" for review.
-    for (const r of batch.filter((x) => !seen.has(x.threadId))) {
+    if (swapped.size) warnings.push(`${swapped.size} label(s) were crossed between threads; re-classified one at a time`);
+    // Retry skipped or crossed replies one at a time (a swap is impossible alone); then fall back to review.
+    for (const r of batch.filter((x) => !seen.has(x.threadId) || swapped.has(x.threadId))) {
       try {
         const [l] = (await call([r])).filter((x) => x.id === r.threadId);
         if (l) {
-          result.set(r.threadId, applyLabel(r, l));
+          result.set(r.threadId, label(r, l));
           continue;
         }
       } catch {
         /* fall through to the fallback */
       }
       warnings.push(`no label for thread ${r.threadId.slice(0, 12)}; marked for review`);
-      result.set(
-        r.threadId,
-        applyLabel(r, { category: "other", confidence: 0, quote: "", referred_name: null, revisit_hint: null, reason: "The model did not return a label" }),
-      );
+      result.set(r.threadId, label(r, { category: "other", confidence: 0, quote: "", referred_name: null, revisit_hint: null, reason: "The model did not return a label" }));
     }
     done += batch.length;
     opts.onProgress?.(done, unique.length);
   });
 
   // Keep the input order.
-  return { classified: unique.map((r) => result.get(r.threadId)!), usage, warnings };
+  return { classified: unique.map((r) => result.get(r.threadId)!), usage, warnings, contexts };
 }

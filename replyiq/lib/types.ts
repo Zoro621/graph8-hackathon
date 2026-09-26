@@ -27,7 +27,7 @@ export interface Reply {
   outbound?: string; // first message with responder USER or AI
   replyText: string; // latest message with responder OTHER, quoted history stripped
   repliedAt?: string;
-  conversation: { from: "us" | "prospect"; text: string; date?: string }[]; // last messages, oldest first
+  conversation: { from: "us" | "prospect"; text: string; date?: string }[]; // the entire thread, oldest first
   summary?: string; // graph8's own thread summary, when present
   existingTags: { id: string; name: string }[];
 }
@@ -39,6 +39,7 @@ export interface Classified extends Reply {
   referredName?: string; // person the prospect pointed us to (referral / left the company)
   revisitHint?: string; // e.g. OOO return date, "next quarter"
   reason?: string; // one-line why, for the UI
+  context?: "full" | "composed" | "truncated"; // what the classifier saw (lib/pipeline/compose.ts)
   needsReview: boolean;
 }
 

@@ -53,6 +53,40 @@ const HARD: { reply: Reply; allowed: Category[]; check?: (c: Classified) => void
   { reply: mk("bounce", "Delivery failed: the address you sent to does not exist."), allowed: ["other"] },
 ];
 
+// Long threads (> 12,000 chars) where the deciding event is buried in the MIDDLE: only a composer that
+// reads the whole thread (and survives grounding) can get these right.
+const PAD = [
+  "Thanks for the update on the rollout plan, sharing with the ops team now.",
+  "We are reviewing the attached one-pager and the integration notes this week.",
+  "Our RevOps lead has a few questions on field mapping for the CRM sync.",
+  "Circling back on the data residency question from our security team.",
+  "Appreciate the detail on enrichment coverage for EMEA accounts.",
+];
+function longLive(id: string, middle: [("us" | "prospect"), string], latest: string): Reply {
+  const conv: Reply["conversation"] = [{ from: "us", text: "Hi Dana, you may remember us from CIENCE. We opened our data platform on a no-cost tier. Worth a look?" }];
+  for (let i = 0; i < 16; i++) conv.push({ from: i % 2 ? "us" : "prospect", text: `${PAD[i % PAD.length]} ${"Detail follows in the notes below for reference. ".repeat(14)}` });
+  conv.push({ from: middle[0], text: middle[1] });
+  for (let i = 0; i < 12; i++) conv.push({ from: i % 2 ? "prospect" : "us", text: `${PAD[(i + 2) % PAD.length]} ${"Additional context for the team is included here. ".repeat(14)}` });
+  conv.push({ from: "prospect", text: latest });
+  return { threadId: id, sequenceId: "live", contactEmail: `${id}@example.com`, replyText: latest, conversation: conv, existingTags: [] };
+}
+
+describe("LIVE composer on long threads (OpenAI)", () => {
+  it("finds a meeting confirmed mid-thread and an unsubscribe buried mid-thread", async () => {
+    const env = getEnv();
+    const booked = longLive("long-booked", ["us", "Great, your meeting for Thursday June 12 at 2:00 PM ET is confirmed and the calendar invite has been sent."], "Quick one: can we make the June 12 call 30 minutes instead of 45?");
+    const unsub = longLive("long-unsub", ["prospect", "Please remove me from your mailing list and stop emailing me about this."], "Ok, thanks.");
+    for (const r of [booked, unsub]) expect(r.conversation.map((m) => m.text).join("\n").length).toBeGreaterThan(12_000);
+
+    const res = await classifyReplies([booked, unsub], { llm: llm(), model: env.OPENAI_CLASSIFY_MODEL });
+    const by = new Map(res.classified.map((c) => [c.threadId, c]));
+    expect(res.contexts.composed, res.warnings.join("\n")).toBe(2);
+    expect(by.get("long-booked")?.category, by.get("long-booked")?.reason).toBe("meeting_booked");
+    expect(by.get("long-unsub")?.category, by.get("long-unsub")?.reason).toBe("unsubscribe");
+    for (const c of res.classified) expect(c.context).toBe("composed");
+  });
+});
+
 describe("LIVE classifier (OpenAI)", () => {
   let results: Map<string, Classified>;
 

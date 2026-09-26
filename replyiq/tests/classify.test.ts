@@ -9,9 +9,8 @@ const MODEL = "test-model";
 describe("classifyReplies", () => {
   it("labels every reply exactly once and keeps input order", async () => {
     const replies = [reply("a", "I am out of office until June 9"), reply("b", "No thanks"), reply("c", "Send pricing please")];
-    const { llm } = fakeLlm((items) =>
-      items.map((i) => label(i.id, i.id === "a" ? "out_of_office" : i.id === "b" ? "hard_no" : "pricing_request", i.latest_prospect_reply)),
-    );
+    const byText = (t: string) => (/office/.test(t) ? "out_of_office" : /No thanks/.test(t) ? "hard_no" : "pricing_request");
+    const { llm } = fakeLlm((items) => items.map((i) => label(i.id, byText(i.latest_prospect_reply), i.latest_prospect_reply)));
     const res = await classifyReplies(replies, { llm, model: MODEL });
     expect(res.classified.map((c) => [c.threadId, c.category])).toEqual([
       ["a", "out_of_office"],
@@ -43,8 +42,8 @@ describe("classifyReplies", () => {
     const replies = [reply("a", "hello there"), reply("b", "I left the company, contact Jane Doe")];
     const { llm, requests } = fakeLlm((items) =>
       items.length === 2
-        ? [label("a", "interested_no_meeting", "hello there")] // skips b
-        : [label("b", "referral_wrong_person", items[0].latest_prospect_reply, { referred_name: "Jane Doe" })],
+        ? [label(items[0].id, "interested_no_meeting", "hello there")] // skips the second
+        : [label(items[0].id, "referral_wrong_person", items[0].latest_prospect_reply, { referred_name: "Jane Doe" })],
     );
     const res = await classifyReplies(replies, { llm, model: MODEL });
     expect(requests).toHaveLength(2);
@@ -82,7 +81,7 @@ describe("classifyReplies", () => {
       [reply("p", "[Anonymized history] This prospect replied to the campaign. Original private reply omitted."), reply("e", " "), reply("n", "no thanks")],
       { llm, model: MODEL },
     );
-    expect(JSON.parse(requests[0].user).items.map((i: { id: string }) => i.id)).toEqual(["n"]);
+    expect(JSON.parse(requests[0].user).items.map((i: { latest_prospect_reply: string }) => i.latest_prospect_reply)).toEqual(["no thanks"]);
     expect(res.classified.map((c) => c.category)).toEqual(["other", "other", "hard_no"]);
   });
 
@@ -111,6 +110,53 @@ describe("classifyReplies", () => {
     expect(sent).not.toContain("508-475-0600");
     expect(sent).toContain("[phone]");
     expect(sent).toContain("US: our pitch");
+  });
+
+  it("sends short per-batch aliases, never the long thread ids", async () => {
+    const { llm, requests } = fakeLlm((items) => items.map((i) => label(i.id, "other", i.latest_prospect_reply)));
+    const res = await classifyReplies([reply("thread-uuid-aaaa", "one"), reply("thread-uuid-bbbb", "two")], { llm, model: MODEL });
+    const sent = JSON.parse(requests[0].user).items;
+    expect(sent.map((i: { id: string }) => i.id)).toEqual(["R1", "R2"]);
+    expect(requests[0].user).not.toContain("thread-uuid");
+    expect(res.classified.map((c) => c.threadId)).toEqual(["thread-uuid-aaaa", "thread-uuid-bbbb"]); // mapped back
+  });
+
+  it("detects labels crossed between threads and re-classifies them one at a time", async () => {
+    const replies = [
+      reply("ooo", "Thanks for your e-mail, I'm out of the office on holiday until June 1."),
+      reply("ref", "Mike is no longer employed here. Please contact Steve Pinchotti instead."),
+      reply("no", "No thank you, not interested."),
+    ];
+    const { llm, requests } = fakeLlm((items) => {
+      if (items.length > 1) {
+        // The model crosses the first two items: each gets the other's label and quote.
+        const [a, b, c] = items;
+        return [
+          label(a.id, "referral_wrong_person", b.latest_prospect_reply, { referred_name: "Steve Pinchotti" }),
+          label(b.id, "out_of_office", a.latest_prospect_reply),
+          label(c.id, "hard_no", c.latest_prospect_reply),
+        ];
+      }
+      const t = items[0].latest_prospect_reply;
+      return [label(items[0].id, /office/.test(t) ? "out_of_office" : "referral_wrong_person", t, /Steve/.test(t) ? { referred_name: "Steve Pinchotti" } : {})];
+    });
+    const res = await classifyReplies(replies, { llm, model: MODEL });
+    const by = Object.fromEntries(res.classified.map((c) => [c.threadId, c]));
+    expect(by.ooo).toMatchObject({ category: "out_of_office", needsReview: false });
+    expect(by.ref).toMatchObject({ category: "referral_wrong_person", referredName: "Steve Pinchotti", needsReview: false });
+    expect(by.no.category).toBe("hard_no");
+    expect(requests).toHaveLength(3); // 1 batch + 2 single re-classifications
+    expect(res.warnings.join()).toMatch(/crossed between threads/);
+  });
+
+  it("isSwapped only fires when the quote is verbatim in ANOTHER reply", async () => {
+    const { isSwapped } = await import("../lib/pipeline/classify");
+    const a = reply("a", "I am out of office until June 9");
+    const b = reply("b", "Please contact Jane Doe instead");
+    expect(isSwapped(a, "Please contact Jane Doe instead", [a, b])).toBe(true);
+    expect(isSwapped(a, "out of office until June 9", [a, b])).toBe(false); // own quote
+    expect(isSwapped(a, "something invented entirely", [a, b])).toBe(false); // invented, not a swap
+    expect(isSwapped(a, "Jane", [a, b])).toBe(false); // too short to judge
   });
 
   it("the prompt defines every category", () => {
