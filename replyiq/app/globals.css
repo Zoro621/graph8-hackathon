@@ -1,26 +1,189 @@
 @import "tailwindcss";
 
+/* ReplyIQ: "Obsidian signal" palette. Near-black ink, iris for the agent,
+   aqua for verified proof, lime for go, amber for gaps, rose for hard stops. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ink: #05060a;
+  --ink-2: #0a0c14;
+  --ink-3: #10131f;
+  --panel: rgba(255, 255, 255, 0.028);
+  --panel-2: rgba(255, 255, 255, 0.05);
+  --line: rgba(255, 255, 255, 0.075);
+  --line-2: rgba(255, 255, 255, 0.14);
+  --text: #eceef6;
+  --muted: #8d93ab;
+  --dim: #5b6179;
+  --iris: #9b8cff;
+  --iris-deep: #6d5cff;
+  --aqua: #4fe3d1;
+  --lime: #d4ff4f;
+  --amber: #ffb547;
+  --rose: #ff5d7a;
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-iris: var(--iris);
+  --color-iris-deep: var(--iris-deep);
+  --color-aqua: var(--aqua);
+  --color-lime: var(--lime);
+  --color-amber: var(--amber);
+  --color-rose: var(--rose);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-instrument-serif);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--ink);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: rgba(155, 140, 255, 0.35);
+  color: #fff;
+}
+
+/* ------------------------------ ambient backdrop ------------------------------ */
+.aurora {
+  position: fixed;
+  inset: -20vmax;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38vmax 30vmax at 18% 12%, rgba(109, 92, 255, 0.16), transparent 60%),
+    radial-gradient(34vmax 26vmax at 85% 18%, rgba(79, 227, 209, 0.09), transparent 60%),
+    radial-gradient(40vmax 30vmax at 60% 100%, rgba(155, 140, 255, 0.08), transparent 60%);
+  animation: drift 28s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes drift {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  100% { transform: translate3d(3vmax, -2vmax, 0) rotate(8deg); }
+}
+
+.grid-floor {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, #000 30%, transparent 75%);
+}
+
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* --------------------------------- surfaces --------------------------------- */
+.surface {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 20px 60px -30px rgba(0, 0, 0, 0.8);
+}
+
+/* Cursor spotlight: set --mx / --my from JS */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.35s;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), var(--spot, rgba(155, 140, 255, 0.14)), transparent 45%);
+}
+.spotlight:hover::before {
+  opacity: 1;
+}
+.spotlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), var(--spot-edge, rgba(155, 140, 255, 0.6)), transparent 50%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+.spotlight:hover::after {
+  opacity: 1;
+}
+
+.text-shine {
+  background: linear-gradient(100deg, #fff 20%, #c9c2ff 40%, #8ff2e6 55%, #fff 75%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shine 7s linear infinite;
+}
+@keyframes shine {
+  to { background-position: -220% 0; }
+}
+
+.hairline-x {
+  background: linear-gradient(90deg, transparent, var(--line-2), transparent);
+  height: 1px;
+}
+
+.scan {
+  background: linear-gradient(90deg, transparent, rgba(155, 140, 255, 0.5), rgba(79, 227, 209, 0.5), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: scan 1.6s linear infinite;
+}
+@keyframes scan {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+.thin-scroll::-webkit-scrollbar { width: 6px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 99px; }
+.thin-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.1) transparent; }
+
+:focus-visible {
+  outline: 2px solid var(--iris);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora, .text-shine, .scan { animation: none; }
 }
