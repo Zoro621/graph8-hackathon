@@ -1,4 +1,4 @@
-// Run the ReplyIQ pipeline from the terminal (M2: load -> fetch -> classify).
+// Run the ReplyIQ pipeline from the terminal (M2: load -> fetch -> classify -> themes).
 // Usage: npm run run:cli -- [--campaign <id> | --sequence <id>] [--limit <n>]
 //        (no selector = the source with the most replies, discovered at runtime)
 import "./load-env";
@@ -30,7 +30,7 @@ async function main() {
   }
 
   const run = await runPipeline(
-    { g8: client, llm: llm(), store: createFileStore(), classifyModel: env.OPENAI_CLASSIFY_MODEL, log: (m) => console.log(m) },
+    { g8: client, llm: llm(), store: createFileStore(), classifyModel: env.OPENAI_CLASSIFY_MODEL, themeModel: env.OPENAI_REASON_MODEL, log: (m) => console.log(m) },
     { selector, limit },
   );
 
@@ -40,6 +40,9 @@ async function main() {
   for (const g of run.groups) {
     const info = categoryInfo(g.key);
     console.log(`\n■ ${g.label} (${g.replies.length})  follow-up: ${info.followUp}${info.answerCard ? "  [Answer Card]" : ""}`);
+    for (const th of g.themes ?? []) {
+      console.log(`   ◆ ${th.label} (${th.threadIds.length})  "${th.quote.slice(0, 70)}"${th.quoteVerified ? "" : "  [quote unverified]"}`);
+    }
     for (const r of g.replies) {
       const extra = [r.referredName && `→ ${r.referredName}`, r.revisitHint && `⟳ ${r.revisitHint}`, r.needsReview && "⚠ review"].filter(Boolean).join("  ");
       console.log(`   ${r.confidence.toFixed(2)}  ${(r.company ?? r.contactEmail).slice(0, 24).padEnd(24)} "${r.quote.replace(/\s+/g, " ").slice(0, 80)}"  ${extra}`);

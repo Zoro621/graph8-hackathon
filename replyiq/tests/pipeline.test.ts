@@ -64,7 +64,29 @@ afterEach(async () => {
 const categoryFor = (text: string) =>
   /office|pto/i.test(text) ? "out_of_office" : /remove/i.test(text) ? "unsubscribe" : /price|pricing/i.test(text) ? "pricing_request" : "hard_no";
 
-describe("runPipeline (integration: sources + fetch + classify + store)", () => {
+describe("runPipeline (integration: sources + fetch + classify + themes + store)", () => {
+  it("a theme failure never fails the run", async () => {
+    const threads = [thread("t1", "Out of office until June 9"), thread("t2", "Out on PTO")];
+    const { llm } = fakeLlm((items) => items.map((i) => label(i.id, "out_of_office", i.latest_prospect_reply)), {
+      themes: () => {
+        throw new Error("themes model down");
+      },
+    });
+    const run = await runPipeline({ g8: fakeOrg(threads), llm, store: createFileStore(dir), classifyModel: "m" }, { selector: { campaignId: "c1" } });
+    expect(run.status).toBe("done");
+    expect(run.steps.themes).toBe("failed");
+    expect(run.groups[0].themes).toBeUndefined();
+    expect(run.groups[0].replies).toHaveLength(2); // classification intact
+    expect(run.errors.join()).toMatch(/themes: .*theme discovery failed/);
+  });
+
+  it("themes step is skipped when no group has 2+ replies", async () => {
+    const { llm, themeRequests } = fakeLlm((items) => items.map((i) => label(i.id, "hard_no", i.latest_prospect_reply)));
+    const run = await runPipeline({ g8: fakeOrg([thread("t1", "no")]), llm, store: createFileStore(dir), classifyModel: "m" }, { selector: { campaignId: "c1" } });
+    expect(run.steps.themes).toBe("skipped");
+    expect(themeRequests).toHaveLength(0);
+  });
+
   it("runs load -> fetch -> classify and persists a complete run", async () => {
     const threads = [thread("t1", "Out of office until June 9"), thread("t2", "Please remove me"), thread("t3", "What is the pricing?"), thread("t4", "Out on PTO")];
     const { llm } = fakeLlm((items) => items.map((i) => label(i.id, categoryFor(i.latest_prospect_reply), i.latest_prospect_reply)));
@@ -74,11 +96,15 @@ describe("runPipeline (integration: sources + fetch + classify + store)", () => 
     const run = await runPipeline({ g8: fakeOrg(threads), llm, store, classifyModel: "m" }, { selector: { campaignId: "c1" } });
 
     expect(run.status).toBe("done");
-    expect(run.steps).toEqual({ load: "done", fetch: "done", classify: "done", tag: "pending", resolve: "pending", cards: "pending" });
+    expect(run.steps).toEqual({ load: "done", fetch: "done", classify: "done", themes: "done", tag: "pending", resolve: "pending", cards: "pending" });
     expect(run.orgId).toBe("org_test");
     expect(run.source).toMatchObject({ name: "SMB Campaign", campaignId: "c1", audienceListId: 100, mailboxes: ["a@example.com"], docs: ["objections"] });
     expect(run.counts).toEqual({ threads: 4, prospectReplies: 4, needsReview: 0 });
-    expect(run.usage.llmCalls).toBe(1);
+    expect(run.usage.llmCalls).toBe(2); // 1 classify + 1 themes (only the 2-reply OOO group qualifies)
+    const ooo = run.groups.find((g) => g.key === "out_of_office")!;
+    expect(ooo.themes?.[0].threadIds.sort()).toEqual(["t1", "t4"]);
+    expect(ooo.replies.every((r) => r.themeId === ooo.themes?.[0].id)).toBe(true);
+    expect(run.groups.find((g) => g.key === "unsubscribe")!.themes).toBeUndefined(); // 1 reply: skipped
     expect(run.groups.map((g) => [g.key, g.replies.length])).toEqual([
       ["pricing_request", 1],
       ["out_of_office", 2],

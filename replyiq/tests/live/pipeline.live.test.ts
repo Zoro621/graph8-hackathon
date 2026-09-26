@@ -51,6 +51,21 @@ function assertRunInvariants(run: Run) {
     if (!r.needsReview) expect(norm(r.replyText)).toContain(norm(r.quote));
   }
   expect(run.counts.needsReview).toBe(all.filter((r) => r.needsReview).length);
+  // themes: never change groups; when present, cover every reply of the group exactly once, grounded
+  expect(run.steps.themes).not.toBe("pending");
+  for (const g of run.groups) {
+    if (!g.themes) continue;
+    expect(g.replies.length).toBeGreaterThanOrEqual(2);
+    const ids = g.themes.flatMap((t) => t.threadIds);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.sort()).toEqual(g.replies.map((r) => r.threadId).sort());
+    for (const t of g.themes) {
+      expect(t.threadIds).toContain(t.quoteThreadId);
+      const src = g.replies.find((r) => r.threadId === t.quoteThreadId)!;
+      if (t.quoteVerified) expect(norm(src.replyText)).toContain(norm(t.quote));
+      for (const id of t.threadIds) expect(g.replies.find((r) => r.threadId === id)?.themeId).toBe(t.id);
+    }
+  }
   expect(writes).toBe(0);
 }
 
@@ -62,7 +77,7 @@ describe("LIVE pipeline (graph8 + OpenAI)", () => {
   it("runs the default source (most replies) end to end", async () => {
     const selector = pickDefaultSource(sources)!;
     const env = getEnv();
-    const run = await runPipeline({ g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL }, { selector });
+    const run = await runPipeline({ g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL, themeModel: env.OPENAI_REASON_MODEL }, { selector });
     assertRunInvariants(run);
     const top = sources.find((s) => s.replyThreads > 0)!;
     expect(run.counts.prospectReplies).toBeGreaterThanOrEqual(top.replyThreads); // campaign may span several sequences
@@ -76,7 +91,7 @@ describe("LIVE pipeline (graph8 + OpenAI)", () => {
     const rest = sources.filter((s) => s.replyThreads > 0).slice(1);
     for (const s of rest) {
       const run = await runPipeline(
-        { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL },
+        { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL, themeModel: env.OPENAI_REASON_MODEL },
         { selector: { sequenceId: s.sequenceId } },
       );
       assertRunInvariants(run);
@@ -87,7 +102,7 @@ describe("LIVE pipeline (graph8 + OpenAI)", () => {
   it("labels are consistent: two runs on the same source agree on >= 90% of replies", async () => {
     const env = getEnv();
     const selector = pickDefaultSource(sources)!;
-    const deps = { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL };
+    const deps = { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL, themeModel: env.OPENAI_REASON_MODEL };
     const [a, b] = await Promise.all([runPipeline(deps, { selector }), runPipeline(deps, { selector })]);
     const cat = (r: Run) => new Map(r.groups.flatMap((g) => g.replies.map((x) => [x.threadId, x.category] as const)));
     const ca = cat(a);
@@ -102,7 +117,7 @@ describe("LIVE pipeline (graph8 + OpenAI)", () => {
   it("fails cleanly (no throw) for a sequence that does not exist", async () => {
     const env = getEnv();
     const run = await runPipeline(
-      { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL },
+      { g8: client, llm: llm(), store: createFileStore(dir), classifyModel: env.OPENAI_CLASSIFY_MODEL, themeModel: env.OPENAI_REASON_MODEL },
       { selector: { sequenceId: "00000000-0000-0000-0000-000000000000" } },
     );
     expect(run.status).toBe("failed");

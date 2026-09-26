@@ -31,12 +31,25 @@ export type Digest = {
 
 export function fakeLlm(
   answer: (items: { id: string; latest_prospect_reply: string; conversation: string; context: string }[]) => Label[] | Promise<Label[]>,
-  opts: { digest?: (threadText: string) => Digest | Promise<Digest> } = {},
+  opts: {
+    digest?: (threadText: string) => Digest | Promise<Digest>;
+    themes?: (payload: ThemesPayload) => ThemesAnswer | Promise<ThemesAnswer>;
+  } = {},
 ) {
   const requests: LlmRequest<unknown>[] = [];
   const digestRequests: LlmRequest<unknown>[] = [];
+  const themeRequests: LlmRequest<unknown>[] = [];
   const llm: Llm = {
     async parse<T>(req: LlmRequest<T>) {
+      if (req.name === "group_themes") {
+        themeRequests.push(req as LlmRequest<unknown>);
+        const payload = JSON.parse(req.user) as ThemesPayload;
+        // Default: everything in one theme, quoting the first reply verbatim.
+        const answer = opts.themes
+          ? await opts.themes(payload)
+          : { themes: [{ label: "All alike", description: "d", members: payload.items.map((i) => i.id), quote_member: payload.items[0].id, quote: payload.items[0].reply }] };
+        return { data: req.schema.parse(answer), usage: { inputTokens: 500, outputTokens: 40 } };
+      }
       if (req.name === "thread_digest") {
         digestRequests.push(req as LlmRequest<unknown>);
         if (!opts.digest) throw new Error("unexpected composer call");
@@ -49,8 +62,14 @@ export function fakeLlm(
       return { data: req.schema.parse({ labels }), usage: { inputTokens: 100, outputTokens: 10 } };
     },
   };
-  return { llm, requests, digestRequests };
+  return { llm, requests, digestRequests, themeRequests };
 }
+
+export type ThemesPayload = {
+  group: { name: string; definition: string };
+  items: { id: string; company: string | null; reply: string; why_in_this_group: string | null; referred_to: string | null; timing: string | null }[];
+};
+export type ThemesAnswer = { themes: { label: string; description: string; members: string[]; quote_member: string; quote: string }[] };
 
 /** A label that quotes the start of the reply verbatim. */
 export const label = (id: string, category: string, text: string, extra: Partial<Label> = {}): Label => ({

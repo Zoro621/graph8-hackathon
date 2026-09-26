@@ -1,4 +1,4 @@
-// Orchestrates a run. M2 covers load -> fetch -> classify; tag/resolve/cards stay "pending" until
+// Orchestrates a run. M2 covers load -> fetch -> classify -> themes; tag/resolve/cards stay "pending" until
 // M3/M4 plug in. Every step's state and any error is persisted, and the function never throws for
 // a pipeline failure: the run file is the source of truth (the UI polls it).
 import type { G8Client } from "../g8";
@@ -8,6 +8,7 @@ import type { RunStore } from "../store";
 import type { Run, StepName } from "../types";
 import { classifyReplies } from "./classify";
 import { groupReplies } from "./group";
+import { discoverThemes } from "./themes";
 import { fetchSourceReplies, resolveSource, type SourceSelector } from "./sources";
 
 export interface PipelineDeps {
@@ -15,6 +16,7 @@ export interface PipelineDeps {
   llm: Llm;
   store: RunStore;
   classifyModel: string;
+  themeModel?: string; // defaults to classifyModel
   now?: () => Date;
   log?: (msg: string) => void;
 }
@@ -34,7 +36,7 @@ export function emptyRun(id: string, selector: SourceSelector, now: Date): Run {
     status: "running",
     orgId: "",
     source: { selector, name: "", campaignId: null, sequences: [], audienceListId: null, mailboxes: [], docs: [], warnings: [] },
-    steps: { load: "pending", fetch: "pending", classify: "pending", tag: "pending", resolve: "pending", cards: "pending" },
+    steps: { load: "pending", fetch: "pending", classify: "pending", themes: "pending", tag: "pending", resolve: "pending", cards: "pending" },
     counts: { threads: 0, prospectReplies: 0, needsReview: 0 },
     usage: { inputTokens: 0, outputTokens: 0, llmCalls: 0 },
     groups: [],
@@ -111,6 +113,25 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
       run.usage = res.usage;
       run.errors.push(...res.warnings.map((w) => `classify: ${w}`));
     });
+
+    // Themes add detail but are not critical: failures become warnings, never a failed run.
+    run.steps.themes = "running";
+    await persist();
+    log("▶ themes");
+    try {
+      const res = await discoverThemes(run.groups, { llm: deps.llm, model: deps.themeModel ?? deps.classifyModel });
+      run.groups = res.groups;
+      run.usage.inputTokens += res.usage.inputTokens;
+      run.usage.outputTokens += res.usage.outputTokens;
+      run.usage.llmCalls += res.usage.llmCalls;
+      run.errors.push(...res.warnings.map((w) => `themes: ${w}`));
+      const eligible = run.groups.filter((g) => g.replies.length >= 2).length;
+      const withThemes = run.groups.filter((g) => g.themes?.length).length;
+      run.steps.themes = eligible === 0 ? "skipped" : withThemes === 0 ? "failed" : "done";
+    } catch (err) {
+      run.steps.themes = "failed";
+      run.errors.push(`themes: ${describeError(err)}`);
+    }
 
     run.status = "done";
   } catch {

@@ -8,7 +8,23 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
-## Thread context update (26 Sep)
+## Themes inside groups (26 Sep)
+- **The 13 categories still decide every action.** A new **themes** step (`lib/pipeline/themes.ts`, `gpt-6-sol`) finds the finer patterns inside each group with 2 or more replies. The AI names them itself; nothing is hardcoded. Example: "per-seat cost too high" vs "locked into an annual contract" inside a price objection.
+- **Grounded and non-critical:**
+  - every reply of a group is in exactly one theme; anything the model skipped goes into "Other"
+  - unknown or duplicate IDs are ignored, empty themes dropped, at most 5 themes (the smallest are merged)
+  - each theme's quote must be verbatim in one of **its own** members; otherwise a member's text is used and marked `quoteVerified: false`
+  - items use short aliases
+  - a failed call leaves that group without themes and adds a warning; the run never fails because of themes
+  - each reply gets a `themeId`; groups get `themes[]`; the run has a `themes` step
+- **Live on the graph8 Tech SMB Sales campaign:**
+  - Referral (7): named replacement 3, manager or team leader 2, email address only 1, already auto-forwarded 1
+  - Out of office (9): gave a backup contact for urgent needs 4, still reachable 3, new-business contact 1, office back Monday 1
+  
+  The "backup contact" theme is directly actionable: those people can be reached now instead of after the return date.
+- **Tests:** 109 offline (validation edge cases, pipeline with a failing or skipped themes step) and 18 live (a synthetic price-objection group must keep per-seat and contract lock-in replies in separate themes, with verbatim quotes, 3 out of 3 runs; plus theme rules checked on every real source).
+
+
 - **The classifier sees the entire conversation.** Every message, oldest first, with quoted history stripped. There's no message-count or per-message limit. This fixed a real loss: the 9-message SPARXiQ thread used to drop our original pitch.
 - **Threads over 12,000 characters go through a composer** (`lib/pipeline/compose.ts`):
   - An LLM pass reads the whole thread, in 60k-character chunks if huge, and writes a digest of every intent-relevant event. Each event carries a verbatim quote.

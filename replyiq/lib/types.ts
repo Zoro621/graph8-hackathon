@@ -40,7 +40,22 @@ export interface Classified extends Reply {
   revisitHint?: string; // e.g. OOO return date, "next quarter"
   reason?: string; // one-line why, for the UI
   context?: "full" | "composed" | "truncated"; // what the classifier saw (lib/pipeline/compose.ts)
+  themeId?: string; // theme inside its group (lib/pipeline/themes.ts)
   needsReview: boolean;
+}
+
+/**
+ * A theme inside one group, found by the AI (not hardcoded). Themes never change actions:
+ * the group's category still decides follow-up / never-contact.
+ */
+export interface Theme {
+  id: string; // stable within the run, e.g. "price_objection:per-seat-cost-too-high"
+  label: string; // a few words
+  description: string; // one sentence
+  threadIds: string[]; // members (every reply of the group is in exactly one theme)
+  quote: string; // verbatim from one member's reply
+  quoteThreadId: string;
+  quoteVerified: boolean; // false if the model's quote could not be found and a fallback was used
 }
 
 export interface ProofItem {
@@ -68,6 +83,7 @@ export interface Group {
   replies: Classified[];
   eligible: { contactId: number; email: string }[];
   excluded: { email: string; reason: ExclusionReason }[];
+  themes?: Theme[]; // only for groups with 2+ replies; absent if theme discovery failed
   card?: AnswerCard;
   draft?: {
     listId: number;
@@ -78,7 +94,7 @@ export interface Group {
   };
 }
 
-export type StepName = "load" | "fetch" | "classify" | "tag" | "resolve" | "cards";
+export type StepName = "load" | "fetch" | "classify" | "themes" | "tag" | "resolve" | "cards";
 export type StepState = "pending" | "running" | "done" | "failed" | "skipped";
 
 export type RunStatus = "running" | "done" | "failed";
