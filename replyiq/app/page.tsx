@@ -9,6 +9,7 @@ const milestones = [
   ["M3", "Tag threads + contact guards", true],
   ["M4", "Answer Cards (grounded)", true],
   ["M5", "Draft follow-up campaign", true],
+  ["M5b", "Follow-up emails (Sequencer) + Studio learnings", true],
   ["M6", "UI", false],
   ["M7", "Hardening + public repo", false],
 ] as const;

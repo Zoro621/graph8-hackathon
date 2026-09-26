@@ -18,6 +18,8 @@ const schema = z.object({
   OPENAI_REASON_MODEL: z.string().default("gpt-6-sol"),
   ENABLE_LAUNCH: boolish,
   MIN_GROUP_SIZE: z.coerce.number().int().min(1).default(2),
+  // Owner of follow-up sequences ReplyIQ creates. Optional: defaults to the original sequence's owner.
+  G8_SEQUENCE_OWNER_EMAIL: z.email().optional().or(z.literal("").transform(() => undefined)),
 });
 
 export type Env = z.infer<typeof schema>;

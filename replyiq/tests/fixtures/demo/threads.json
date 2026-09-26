@@ -36,7 +36,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+          "name": "ReplyIQ · Meeting request"
+        }
+      ],
       "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
       "source": "emails.search"
     },
@@ -76,7 +81,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+          "name": "ReplyIQ · Out of office"
+        }
+      ],
       "summary": "Synthetic practice conversation: Out of office in this training scenario.",
       "source": "emails.search"
     }
@@ -118,7 +128,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+          "name": "ReplyIQ · Pricing request"
+        }
+      ],
       "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
       "source": "emails.search"
     },
@@ -158,7 +173,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+          "name": "ReplyIQ · Unsubscribe"
+        }
+      ],
       "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
       "source": "emails.search"
     },
@@ -198,7 +218,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+          "name": "ReplyIQ · Unsubscribe"
+        }
+      ],
       "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
       "source": "emails.search"
     },
@@ -238,7 +263,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+          "name": "ReplyIQ · Pricing request"
+        }
+      ],
       "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
       "source": "emails.search"
     },
@@ -278,7 +308,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+          "name": "ReplyIQ · Meeting request"
+        }
+      ],
       "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
       "source": "emails.search"
     },
@@ -318,7 +353,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+          "name": "ReplyIQ · Interested, no meeting"
+        }
+      ],
       "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
       "source": "emails.search"
     },
@@ -358,7 +398,16 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+          "name": "ReplyIQ · Out of office"
+        },
+        {
+          "id": "2e92f4d1-8b58-4e1c-b8da-4ff7c1a16b29",
+          "name": "ReplyIQ · Needs review"
+        }
+      ],
       "summary": "Synthetic practice conversation: Out of office in this training scenario.",
       "source": "emails.search"
     },
@@ -398,7 +447,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+          "name": "ReplyIQ · Hard no"
+        }
+      ],
       "summary": "Synthetic practice conversation: Not interested at this time.",
       "source": "emails.search"
     },
@@ -438,7 +492,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+          "name": "ReplyIQ · Hard no"
+        }
+      ],
       "summary": "Synthetic practice conversation: Not interested at this time.",
       "source": "emails.search"
     },
@@ -478,7 +537,12 @@
           "isDraft": false
         }
       ],
-      "tags": [],
+      "tags": [
+        {
+          "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+          "name": "ReplyIQ · Interested, no meeting"
+        }
+      ],
       "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
       "source": "emails.search"
     }

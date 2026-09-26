@@ -1,6 +1,6 @@
 import { G8Error } from "@graph8/sdk";
 import { describe, expect, it, vi } from "vitest";
-import { createG8Client, describeError, fromSearchItem, normaliseTagList, toStudioDoc, WriteNotAllowedError } from "../lib/g8";
+import { createG8Client, describeError, extractEmailDraft, fromSearchItem, normaliseTagList, toStudioDoc, WriteNotAllowedError } from "../lib/g8";
 
 type Route = (url: URL, init: RequestInit) => Response | Promise<Response>;
 
@@ -272,5 +272,98 @@ describe("normalisers", () => {
       displayName: "Proof Catalog",
       content: "proof",
     });
+  });
+});
+
+describe("credits", () => {
+  it("reads the balance from an enveloped or a bare /usage response", async () => {
+    const bal = { credits: 8997, held_credits: 0, available_credits: 8997, total_used: 1003 };
+    expect(await client({ "GET /usage": () => json({ data: bal }) }).c.getUsage()).toEqual(bal);
+    expect(await client({ "GET /usage": () => json(bal) }).c.getUsage()).toMatchObject({ available_credits: 8997 });
+  });
+});
+
+describe("spurious 401", () => {
+  it("retries a read once after a 401 and succeeds", async () => {
+    let n = 0;
+    const { c, calls, sleeps } = client({
+      "GET /roles/me/permissions": () => (++n === 1 ? json({ detail: "Invalid API key" }, 401) : json({ data: { org_id: "org_x" } })),
+    });
+    expect((await c.whoAmI()).org_id).toBe("org_x");
+    expect(calls).toHaveLength(2);
+    expect(sleeps).toEqual([1000]);
+  });
+
+  it("a key that is really invalid still fails after one retry", async () => {
+    const { c, calls } = client({ "GET /roles/me/permissions": () => json({ detail: "Invalid API key" }, 401) });
+    await expect(c.whoAmI()).rejects.toMatchObject({ status: 401 });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("never retries a write on 401", async () => {
+    const { c, calls } = client(
+      {
+        "GET /roles/me/permissions": () => json({ data: { org_id: "org_ok" } }),
+        "POST /lists": () => json({ detail: "Invalid API key" }, 401),
+      },
+      { writeOrgIds: ["org_ok"] },
+    );
+    await expect(c.createList("t", "d")).rejects.toMatchObject({ status: 401 });
+    expect(calls.filter((x) => x.method === "POST")).toHaveLength(1);
+  });
+});
+
+describe("spurious 401 on the email search (a read sent as POST)", () => {
+  it("is retried once", async () => {
+    let n = 0;
+    const { c, calls } = client({
+      "POST /inbox/emails/search": () => (++n === 1 ? json({ detail: "Invalid API key" }, 401) : json({ data: { items: [], total: 0 } })),
+    });
+    expect(await c.searchEmailThreads(["mb@example.com"])).toEqual([]);
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("follow-up sequences and Studio documents", () => {
+  const ok = { "GET /roles/me/permissions": () => json({ data: { org_id: "org_ok" } }) };
+
+  it("createSequence is a guarded POST /sequences with an idempotency key", async () => {
+    const { c, calls } = client({ ...ok, "POST /sequences": () => json({ data: { id: "s1", name: "n", status: "draft" } }) }, { writeOrgIds: ["org_ok"] });
+    expect(await c.createSequence({ name: "n", user_email: "o@example.com", steps: [] }, "k1")).toMatchObject({ id: "s1" });
+    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/sequences", body: { name: "n", user_email: "o@example.com" } });
+    const blocked = client({ ...ok, "POST /sequences": () => json({}) }, { writeOrgIds: [] });
+    await expect(blocked.c.createSequence({ name: "n", user_email: "o@example.com" })).rejects.toBeInstanceOf(WriteNotAllowedError);
+    expect(blocked.calls.some((x) => x.path === "/sequences")).toBe(false);
+  });
+
+  it("estimate is a free read (no write policy); generate is guarded and accepts nested draft shapes", async () => {
+    const body = { contact_id: 1, contact_work_email: "a@example.com", first_name: "A", last_name: "B", instructions: "i", lead_info: "l", agent_name: "default" };
+    const est = client({ "POST /sequencer/content/email/estimate": () => json({ data: { estimated_credits: 9, capped: false } }) });
+    expect(await est.c.estimateEmailDraft(body)).toMatchObject({ estimated_credits: 9 });
+    expect(est.calls.some((x) => x.path === "/roles/me/permissions")).toBe(false);
+    const gen = client({ ...ok, "POST /sequencer/content/email/generate": () => json({ data: { email: { subject: "s", body: "<p>b</p>" } } }) }, { writeOrgIds: ["org_ok"] });
+    expect(await gen.c.generateEmailDraft(body)).toEqual({ subject: "s", body: "<p>b</p>" });
+    const blocked = client({ ...ok }, { writeOrgIds: [] });
+    await expect(blocked.c.generateEmailDraft(body)).rejects.toBeInstanceOf(WriteNotAllowedError);
+  });
+
+  it("extractEmailDraft reads top-level or nested shapes and rejects empty responses", () => {
+    expect(extractEmailDraft({ subject: "s", body: "b" })).toEqual({ subject: "s", body: "b" });
+    expect(extractEmailDraft({ draft: { subject: "s", html: "<p>h</p>" } })).toEqual({ subject: "s", body: "<p>h</p>" });
+    expect(() => extractEmailDraft({ status: "ok" })).toThrow(/no email draft .*status/);
+  });
+
+  it("getGlobalDoc reads content + version; updateGlobalDoc is a guarded PATCH", async () => {
+    const { c, calls } = client(
+      {
+        ...ok,
+        "GET /global-context/documents/mh": () => json({ data: { id: "mh", display_name: "Messaging House", content: "text", version: 1, current_version: 4, updated_at: "2026-09-27T00:00:00Z" } }),
+        "PATCH /global-context/documents/mh": () => json({ data: { id: "mh", version: 5 } }),
+      },
+      { writeOrgIds: ["org_ok"] },
+    );
+    expect(await c.getGlobalDoc("mh")).toMatchObject({ id: "mh", displayName: "Messaging House", content: "text", version: 4 });
+    await c.updateGlobalDoc("mh", "new");
+    expect(calls.at(-1)).toMatchObject({ method: "PATCH", path: "/global-context/documents/mh", body: { content: "new" } });
   });
 });

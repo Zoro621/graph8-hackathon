@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { CampaignCreateBody, CampaignDocument } from "../lib/g8";
+import type { CampaignCreateBody, CampaignDocument, SequenceCreateBody, SequenceDetail } from "../lib/g8";
 import { WriteNotAllowedError } from "../lib/g8";
 import {
   buildBrief,
@@ -33,7 +33,7 @@ function makeRun(groups: Group[]): Run {
   const run = emptyRun("abcdefghijkl", { campaignId: "c1" }, new Date("2026-09-26T10:00:00Z"));
   run.status = "done";
   run.steps.resolve = "done";
-  run.source = { ...run.source, name: "SMB Campaign", campaignId: "c1" };
+  run.source = { ...run.source, name: "SMB Campaign", campaignId: "c1", sequences: [{ id: "src-seq", name: "SMB sequence", status: "paused" }] };
   run.groups = groups;
   return run;
 }
@@ -61,8 +61,12 @@ const pricing = (): Group => ({
 });
 
 /** Fake graph8: records every write; docs evolve per poll. */
-function fakeG8(opts: { docs?: CampaignDocument[][]; suppressed?: number[]; suppressionFails?: number[]; notAllowed?: boolean; contacts?: { id: number; first_name: string; last_name: string; work_email: string }[] } = {}) {
-  const log = { lists: [] as { title: string; key?: string }[], added: [] as number[][], campaigns: [] as { body: CampaignCreateBody; key?: string }[], updates: [] as { docId: string; content: string }[], polls: 0 };
+function fakeG8(opts: { docs?: CampaignDocument[][]; suppressed?: number[]; suppressionFails?: number[]; notAllowed?: boolean; sequenceFails?: boolean; contacts?: { id: number; first_name: string; last_name: string; work_email: string }[] } = {}) {
+  const log = { lists: [] as { title: string; key?: string }[], added: [] as number[][], campaigns: [] as { body: CampaignCreateBody; key?: string }[], updates: [] as { docId: string; content: string }[], sequences: [] as { body: SequenceCreateBody; key?: string }[], polls: 0 };
+  const seqDetail = (id: string, listId: number | null): SequenceDetail => ({
+    id, name: "seq", status: "draft", user_email: "owner@example.com", step_count: null, contact_count: null, sequence_kind: "cold_outbound",
+    associated_list_id: listId, created_at: null, updated_at: null, description: null, finish_on_reply: true, pinned_mailbox_id: null,
+  });
   const docContent = new Map<string, string>();
   const docsSeq = opts.docs ?? [[
     { id: "o", file_type: "messaging_objections", status: "completed" },
@@ -102,6 +106,20 @@ function fakeG8(opts: { docs?: CampaignDocument[][]; suppressed?: number[]; supp
       return { id: docId };
     },
     getCampaignFull: async () => ({ id: "c1", name: "SMB Campaign", status: "paused", target_persona: "RevOps leaders" }),
+    // follow-up sequence (M5b)
+    listGlobalDocs: async () => [],
+    createSequence: async (body: SequenceCreateBody, key?: string) => {
+      if (opts.sequenceFails) throw new Error("sequencer down");
+      log.sequences.push({ body, key });
+      return { id: `seq-${log.sequences.length}`, name: body.name, status: "draft" };
+    },
+    updateSequenceStep: async () => ({}),
+    addSequenceSteps: async () => ({}),
+    getSequence: async (id: string) => seqDetail(id, id === "src-seq" ? null : (log.sequences.at(-1)?.body.associated_list_id ?? null)),
+    getSequenceSteps: async (id: string) => ({ sequence_id: id, steps: id === "src-seq" ? [] : ((log.sequences.at(-1)?.body.steps ?? []) as unknown as Record<string, unknown>[]) }),
+    findContactByEmail: async (email: string) => ({ id: 1, first_name: "Pat", last_name: "Lee", work_email: email, job_title: "VP Sales", company_id: null }),
+    estimateEmailDraft: async () => ({ estimated_credits: 9 }),
+    generateEmailDraft: async () => ({ subject: "your agenda", body: "Hi Pat, here it is." }),
   };
   return { g8, log, docContent };
 }
@@ -238,6 +256,56 @@ describe("draftCampaign", () => {
     expect(d.audience[0]).toMatchObject({ contactId: 501, referredBy: "Old Contact" });
     expect(d.audienceNotes.join(" ")).toMatch(/Sam Poe .*not in the CRM/);
     expect(d.audienceNotes.join(" ")).toMatch(/their team leaders/);
+  });
+});
+
+describe("draftCampaign: follow-up sequence stage", () => {
+  it("builds a draft sequence on the draft's list and links the Studio campaign; no sender, owner from the original", async () => {
+    await store.save(makeRun([pricing()]));
+    const { g8, log } = fakeG8();
+    const d = await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(d.status).toBe("ready");
+    expect(d.sequence?.status).toBe("ready");
+    expect(log.sequences).toHaveLength(1);
+    const body = log.sequences[0].body;
+    expect(body).toMatchObject({ associated_list_id: 77, campaign_id: "camp-1", user_email: "owner@example.com", finish_on_reply: true });
+    expect(body).not.toHaveProperty("channels");
+    expect(log.sequences[0].key).toBe("replyiq:abcdefghijkl:pricing_request:sequence");
+    // no model in these tests: step 1 only (graph8's AI, grounded instructions), and a warning says so
+    expect(body.steps).toHaveLength(1);
+    expect(body.steps![0]).toMatchObject({ step_type: "EMAIL", input_type: "ON_DEMAND" });
+    expect(body.steps![0].step_data.instructions).toContain("No cost estimator.");
+    expect(d.sequence?.warnings.join(" ")).toMatch(/no model configured/);
+    expect(d.sequence?.verified).toBe(true);
+    // re-running reuses the sequence
+    await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(log.sequences).toHaveLength(1);
+  });
+
+  it("sequenceOnly builds the sequence for an existing draft without touching list, campaign or docs", async () => {
+    await store.save(makeRun([pricing()]));
+    await draftCampaign(deps(fakeG8().g8), { runId: "abcdefghijkl", groupKey: "pricing_request", skipSequence: true });
+    const { g8, log } = fakeG8();
+    const d = await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request", sequenceOnly: true });
+    expect(d.status).toBe("ready");
+    expect(log.lists).toHaveLength(0);
+    expect(log.campaigns).toHaveLength(0);
+    expect(log.updates).toHaveLength(0);
+    expect(log.polls).toBe(0);
+    expect(log.sequences).toHaveLength(1);
+  });
+
+  it("sequenceOnly needs an existing draft; skipSequence builds none; a sequencer failure never fails the draft", async () => {
+    await store.save(makeRun([pricing()]));
+    await expect(draftCampaign(deps(fakeG8().g8), { runId: "abcdefghijkl", groupKey: "pricing_request", sequenceOnly: true })).rejects.toBeInstanceOf(DraftError);
+    const skip = fakeG8();
+    await draftCampaign(deps(skip.g8), { runId: "abcdefghijkl", groupKey: "pricing_request", skipSequence: true });
+    expect(skip.log.sequences).toHaveLength(0);
+    const down = fakeG8({ sequenceFails: true });
+    const d = await draftCampaign(deps(down.g8), { runId: "abcdefghijkl", groupKey: "pricing_request", sequenceOnly: true });
+    expect(d.status).toBe("ready");
+    expect(d.sequence?.status).toBe("failed");
+    expect(d.warnings.join(" ")).toMatch(/follow-up sequence not created: .*sequencer down/);
   });
 });
 

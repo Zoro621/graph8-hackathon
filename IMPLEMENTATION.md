@@ -8,6 +8,96 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M5b results (27 Sep, verified live): follow-up emails via the Sequencer, and company-wide learnings
+**Why:** Studio's generator loses the campaign's Emails document in this org (see the regression section below). graph8's own SMB sequence (`e470a095…`) shows the path that works:
+- step 1 is `EMAIL` + `ON_DEMAND`: graph8's AI writes each contact's email at send time from `step_data.instructions`
+- step 2 is `MANUAL_TEMPLATE`
+
+**What ReplyIQ builds** (`lib/pipeline/followupSequence.ts`, run as the last stage of `npm run draft`, or on its own with `--sequence-only`):
+1. **Facts:**
+   - the Answer Card's verified proof
+   - up to 6 facts a model picks from the company's documents and the original sequence's own copy (the team's approved pitch), each kept only if its excerpt is verbatim in its source
+   - voice documents (Brand Voice, style guides, Compliance) guide tone but are never facts
+2. **Step 2 text:** written by ReplyIQ from those facts only. Fact-check:
+   - deterministic: every number must be in a fact; merge fields from a fixed list; no placeholders; length; the original campaign's hard rules turned into checks (banned word, no dashes)
+   - model audit: lists any statement about the company that the facts don't support; it is told where the email sits in the sequence
+   - one rewrite with the problems; if it still fails, step 2 is left out
+3. **Step 1 instructions**, assembled by code in the same shape as graph8's own AI steps:
+   - what the group said (verbatim) and the goal (the card's angle, else one per follow-up type)
+   - the facts, the never-claim list and the original campaign's rules
+   - the classifier's internal notes are stripped out
+4. **`POST /sequences`:**
+   - draft, on the draft's list, linked to the Studio campaign
+   - owner = the original sequence's owner (or `G8_SEQUENCE_OWNER_EMAIL`)
+   - **no sender attached, never run**
+   - read back and compared; `--refresh-sequence` re-writes the steps in place with `PATCH`/`POST .../steps`, so there is never a second sequence
+5. **Previews** (`--previews n`): graph8's `POST /sequencer/content/email/generate` drafts step 1 per contact with CRM fields only, as at send time. ReplyIQ fact-checks each, and numbers from the recipient's own details are allowed. graph8's `/estimate` prices each first (about 9 credits; 0 when cached).
+
+**Live:**
+- `[DEMO]` "Interested, no meeting" → sequence `82997ef4…` (list 4): step 2 passed first time, both graph8 previews passed.
+- SMB "Out of office" → sequence `c5a08249…` (list 3, 9 contacts), no previews because these are real people:
+  - 5 rules carried over from the team's own instructions (never "free", no dashes, no meeting asks…)
+  - facts from the original sequence's copy; step 2 passed first time
+  - both sequences were read back as matching, with no sender attached.
+- **Audit tuning, from real output:**
+  - graph8's AI wrote "what a 25-minute demo *typically* covers", and the audit rightly flagged the generalisation.
+  - Step 2's "in case it got buried" was wrongly flagged until the auditor was told where the email sits in the sequence.
+  - Wording about the meeting itself ("what I'd walk you through") is now treated as fine.
+
+**Company-wide learnings** (`lib/pipeline/studioLearnings.ts`, `npm run learn`):
+- **Propose** (read-only): turns the run's Answer Cards into two blocks.
+  - Messaging House: "Heard in the field", with verbatim quotes, how to answer, verified proof and don't-claim.
+  - Proof Catalog: "Proof we still need", listing the proof gaps.
+  - The proposal is stored on the run for review.
+- **Apply** (`--apply`, after approval): saves exactly the reviewed text.
+  - It re-reads each document first and replaces only ReplyIQ's block, marked with start and end comments; there is one block per source campaign, so re-runs don't duplicate. Everyone else's text is untouched.
+  - It reads the document back to verify and records graph8's new version number.
+- **Applied live after approval** (`[DEMO]` run `t5ee87bjjv8y`) to the Messaging House and the Proof Catalog. Each block was read back and found exactly once.
+- **Undo** (`npm run learn -- --remove`) takes ReplyIQ's block out and leaves the rest of the document as it is. `--apply` also keeps a local backup of each document as it was before ReplyIQ's first save (in the run file; `data/runs` is gitignored).
+- **Version history finding:** a document's *first* save through the API became version 1 containing the new text, so the text from before it was not in graph8's history. `current_version` counts saves, but `version` stayed at 1.
+  - To create a real restore point, the undo was tested live: remove, which restored the original as **version 2**, then re-apply, which gave **version 3**, identical to the first save.
+  - So graph8's history now has the pre-ReplyIQ text, and the local backups match it.
+
+## Integration status (27 Sep)
+- **Backend ↔ graph8:** every stage is integrated and verified live by reading graph8 back. The chain is discovery, then fetch, classify, themes, tags, audience, Answer Cards, Studio draft, follow-up sequence (with previews) and company-wide learnings. Commands: `npm run e2e`, `npm run test:live`, `npm run spike`.
+- **Backend ↔ UI: not connected yet.**
+  - The branch `feat/replyiq-ui` forked at M0 (`66662b7`), before M1–M5b. It runs on its own demo engine and fixtures (`lib/demo/*`), with an older copy of `lib/types.ts` and `lib/taxonomy.ts`. It doesn't call the backend.
+  - To integrate:
+    1. Rebase it on `main`, keeping `main`'s `lib/types.ts` / `lib/taxonomy.ts`. The UI's shapes are mostly a subset, but `Run.source` differs (selector + sequences, not `sequenceId`), and there is a `themes` step and a `meeting_booked` category.
+    2. Add the API routes the UI expects (`GET /api/sources`, `POST /api/runs`, `GET /api/runs/[id]`, draft, sequence preview, learnings propose/apply/remove) as thin wrappers over the existing library functions.
+    3. Swap the demo engine for those routes: the engine header already says this is a one-file change.
+
+**Tests (final run, 27 Sep):** 205 offline, 22/22 live, 26/26 spike checks, `npm run e2e -- --once` 31 passed and 0 failed (the 1 warning is the stale Demo Contact 05 tag). The 40 new offline tests cover: rules extraction, number, merge-field and placeholder checks, claim verification, instructions, retries, fail-closed audit, previews, reuse, in-place refresh, read-back, block upsert keeping others' edits, propose/apply/remove with backup, and the client calls. The live tests and the e2e run now also verify every recorded sequence, and every applied Studio block, against graph8.
+
+## End-to-end regression (27 Sep, `npm run e2e -- --draft auto`)
+One command runs the whole chain against the real org and **verifies every result by reading graph8 back** (`scripts/e2e.ts`; report in `data/e2e/`, gitignored). Result: **37 passed, 1 warning, 0 failed** in 8 minutes.
+- **Safety:** writes allowed only via the org allowlist; a client with an empty allowlist is refused before any request leaves (checked live).
+- **Discovery:** 6 sequences, 4 with replies, found at runtime: SMB full campaign (19), `[DEMO]` OrbitDesk (10), `[Hackathon copy]` SMB (9), `[DEMO]` MapleMetrics (2).
+- **Every source, twice:** each run finished with every critical step done. Invariants held on all 40 replies: one group each, verbatim quotes, themes covering each group exactly once, and every thread carrying its ReplyIQ tag when read back from graph8. The audience never includes a hard stop, and suppression was re-checked live for all 22 eligible contacts. The second run gave **100% identical labels** on every source, with no thread re-tagged.
+- **Answer Cards** (`[DEMO]` OrbitDesk): 2 cards, 5 proof excerpts re-verified verbatim against freshly read documents, 2 proof gaps named, 0 unverified claims.
+- **Draft:** fresh campaign `e09cbc54…` for "Interested, no meeting" (list 4, 2 contacts). Read back: the audience list is attached, the draft is not launched, no hard-stop or suppressed contact is in the list, and the Answer Card section appears exactly once. A second draft reused the same campaign and list. All 3 recorded drafts are still intact.
+- **Credits:** about **212 per draft**, from graph8's own ledger (`GET /usage/transactions`). The same pattern followed each of the 3 drafts:
+  - 7 Studio LLM calls at 20 credits each (140)
+  - 4 image generations at 5 each (20)
+  - 3 Studio Global LLM calls, arriving up to 14 minutes later (52)
+- **Why Studio "fails" 7 of 9 documents** (the same on all 3 drafts): it's a graph8 bug in saving, not in generation.
+  - The ledger shows graph8 **did generate and bill** each of the 7 documents (up to about 6k output tokens each). Every one was marked `failed` within 0.1 s of being charged, and its content was discarded.
+  - `GET /campaigns/{id}/generation-progress` reports "Generation failed before starting - task may have crashed".
+  - `GET /campaigns/{id}/status` crashes with a 500: `'CBCampaignMetadata' object has no attribute 'generation_duration_seconds'`. That looks like the same save step breaking.
+  - Only the 2 template documents (sequence, step catalog) survive. They are generated without an LLM call and without that save step.
+- **Findings:**
+  - One `[DEMO]` thread (Demo Contact 05) keeps an older "Needs review" tag next to its current "Out of office". graph8's only removal endpoint returns 404 for seeded threads.
+  - The `[Hackathon copy]` replies are anonymised placeholders ("Original private reply omitted"), so all 9 correctly land in Needs review. Seeding real reply text needs no code change.
+  - Both sender mailboxes are `disconnected`. Studio also didn't generate the `emails` document, so a launch would still be blocked after connecting a mailbox.
+  - **Spurious 401:** when 6 live test files started together, graph8 answered two reads with 401 "Invalid API key", though the same key worked right before and after. Two fixes:
+    - `lib/g8.ts` now retries a read once after a 401; writes are never retried, and a key that is really invalid still fails.
+    - Live test files run one at a time.
+- **All layers after the fixes:**
+  - lint, typecheck and build are clean
+  - 169 offline tests pass (new: credit balance, 401 retry for reads including the POST email search, no retry for writes)
+  - 21/21 live tests pass
+  - 22/22 spike checks pass
+
 ## M5 results (26 Sep, verified live in graph8)
 - **Draft a follow-up campaign for one group of a saved run** (`lib/pipeline/draftCampaign.ts`, `npm run draft`). It runs on demand only, because Studio's document generation spends credits. **Nothing is sent or launched.**
   1. **Audience:** the group's eligible contacts. For **referrals, the named people** are looked up in the CRM with a free search: exact full-name match at the same company, and ambiguous matches are skipped. The person who left is never targeted. Roles ("their team leaders") and bare emails are reported, not guessed.

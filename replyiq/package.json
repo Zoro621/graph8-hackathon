@@ -13,7 +13,9 @@
     "spike": "tsx scripts/spike.ts",
     "run:cli": "tsx scripts/run.ts",
     "test:live": "cross-env RUN_LIVE=1 vitest run tests/live",
-    "draft": "tsx scripts/draft.ts"
+    "draft": "tsx scripts/draft.ts",
+    "e2e": "tsx scripts/e2e.ts",
+    "learn": "tsx scripts/learn.ts"
   },
   "dependencies": {
     "@graph8/sdk": "^0.245.0",

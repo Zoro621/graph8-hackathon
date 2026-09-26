@@ -23,7 +23,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+        "name": "ReplyIQ · Meeting request"
+      }
+    ]
   },
   {
     "threadId": "b4350be9-0d67-55fc-8988-7756d98acc2c",
@@ -49,7 +54,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Out of office in this training scenario.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+        "name": "ReplyIQ · Out of office"
+      }
+    ]
   },
   {
     "threadId": "9c4c95de-d22c-5b6d-bead-cf68e8e001c8",
@@ -75,7 +85,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+        "name": "ReplyIQ · Pricing request"
+      }
+    ]
   },
   {
     "threadId": "ddbbc087-de64-549e-9cc3-21c8f2774f4c",
@@ -101,7 +116,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+        "name": "ReplyIQ · Unsubscribe"
+      }
+    ]
   },
   {
     "threadId": "64336ae0-8a2c-577b-a4ee-9ce8084c6286",
@@ -127,7 +147,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+        "name": "ReplyIQ · Unsubscribe"
+      }
+    ]
   },
   {
     "threadId": "129e7abf-bac3-5ce9-9b75-f65ad3db1c4d",
@@ -153,7 +178,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+        "name": "ReplyIQ · Pricing request"
+      }
+    ]
   },
   {
     "threadId": "4e0c9d09-1a85-5e67-94e6-38c28a64a39a",
@@ -179,7 +209,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+        "name": "ReplyIQ · Meeting request"
+      }
+    ]
   },
   {
     "threadId": "93b93da0-6222-5ebc-a39e-a4e19a61af1c",
@@ -205,7 +240,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+        "name": "ReplyIQ · Interested, no meeting"
+      }
+    ]
   },
   {
     "threadId": "e94cf4c2-b87b-5439-ad96-111d20a53b5d",
@@ -231,7 +271,16 @@
       }
     ],
     "summary": "Synthetic practice conversation: Out of office in this training scenario.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+        "name": "ReplyIQ · Out of office"
+      },
+      {
+        "id": "2e92f4d1-8b58-4e1c-b8da-4ff7c1a16b29",
+        "name": "ReplyIQ · Needs review"
+      }
+    ]
   },
   {
     "threadId": "5f2b9586-63c3-55ea-b693-ff36d420df63",
@@ -257,7 +306,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Not interested at this time.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+        "name": "ReplyIQ · Hard no"
+      }
+    ]
   },
   {
     "threadId": "fbf2b049-4546-5b89-a82e-5e15a4124f71",
@@ -283,7 +337,12 @@
       }
     ],
     "summary": "Synthetic practice conversation: Not interested at this time.",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+        "name": "ReplyIQ · Hard no"
+      }
+    ]
   },
   {
     "threadId": "80528b43-a831-5cb2-ba30-3ee1c463999c",
@@ -309,6 +368,11 @@
       }
     ],
     "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
-    "existingTags": []
+    "existingTags": [
+      {
+        "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+        "name": "ReplyIQ · Interested, no meeting"
+      }
+    ]
   }
 ]

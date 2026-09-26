@@ -8,6 +8,9 @@
 //                data (Answer Card, verbatim quotes, verified proof, proof gap = "do not claim")
 //   docs      -> wait for generation, then append the Answer Card to Messaging & Objections and
 //                Reply Templates (marker-guarded, so re-runs never duplicate)
+//   sequence  -> the follow-up EMAILS as a graph8 Sequencer draft (followupSequence.ts): step 1 written
+//                per contact by graph8's AI from grounded instructions, step 2 ReplyIQ's fact-checked text;
+//                no sender attached, never run here
 // Every stage is persisted; re-running reuses the existing list / campaign (idempotency keys + saved ids).
 import { z } from "zod";
 import type { CampaignDocument, G8Client } from "../g8";
@@ -16,6 +19,7 @@ import type { Llm } from "../llm";
 import type { RunStore } from "../store";
 import { allowsFollowUpCampaign, categoryInfo, isHardStop } from "../taxonomy";
 import type { CampaignDraft, Classified, Group, Run } from "../types";
+import { buildFollowupSequence, type SequenceClient } from "./followupSequence";
 import { findCampaignDoc } from "./sources";
 
 export const LIMITS = { name: 255, category: 100, persona: 200, goal: 255 } as const;
@@ -40,7 +44,8 @@ export function parsePersonNames(referred: string | undefined): string[] {
 
 const sameName = (a: string, b: string) => a.toLowerCase().replace(/\s+/g, " ").trim() === b.toLowerCase().replace(/\s+/g, " ").trim();
 
-type DraftClient = Pick<
+type DraftClient = SequenceClient &
+  Pick<
   G8Client,
   | "assertWriteAllowed"
   | "searchContacts"
@@ -243,6 +248,9 @@ export interface DraftDeps {
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   log?: (m: string) => void;
+  auditModel?: string; // fact-checks the follow-up emails (defaults to model)
+  ownerEmail?: string; // follow-up sequence owner (defaults to the original sequence's owner)
+  agentName?: string; // graph8 textual agent used for previews
 }
 
 export interface DraftOptions {
@@ -251,6 +259,11 @@ export interface DraftOptions {
   force?: boolean; // create a new campaign even if one exists for this group
   patchOnly?: boolean; // only (re)try patching docs of an existing draft
   refreshDocs?: boolean; // re-write ReplyIQ's own sections (e.g. after the card changed)
+  sequenceOnly?: boolean; // only build (or preview) the follow-up sequence of an existing draft
+  skipSequence?: boolean; // do not build the follow-up sequence
+  rebuildSequence?: boolean; // create a new sequence even if one exists
+  refreshSequence?: boolean; // re-write the existing sequence's steps in place
+  previews?: number; // graph8 drafts of step 1 for up to N contacts (spends credits)
 }
 
 export class DraftError extends Error {
@@ -287,9 +300,11 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
     : { status: "drafting", audience: [], audienceNotes: [], docsPatched: [], docsPending: [], docsFailed: [], generation: "unknown", warnings: [], createdAt: now(), updatedAt: now() };
   draft.docsFailed ??= [];
   if (opts.patchOnly && !draft.campaignId) throw new DraftError("no existing draft to patch; create it first");
+  if (opts.sequenceOnly && !draft.listId) throw new DraftError("no existing draft with a list; create the draft first");
   await save(draft);
 
-  try {
+  // Stages 1-5: audience, list, Studio campaign, documents.
+  const studioStages = async () => {
     if (!draft.campaignId) {
       // 1) Audience.
       const { ids: stopIds, emails: stopEmails } = hardStopContacts(run);
@@ -425,7 +440,26 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
       await save(draft);
     }
     if (draft.docsPending.length) draft.warnings.push(`documents still generating: ${draft.docsPending.join(", ")}; run again with --patch-only to add the Answer Card`);
+  };
 
+  try {
+    if (!opts.sequenceOnly) await studioStages();
+    // 6) The follow-up emails, as a Sequencer draft. Not critical for the Studio draft: failures are warnings.
+    if (!opts.skipSequence) {
+      try {
+        draft.sequence = await buildFollowupSequence(
+          { g8: deps.g8, llm: deps.llm, model: deps.model, auditModel: deps.auditModel, ownerEmail: deps.ownerEmail, agentName: deps.agentName, now: deps.now, log },
+          run,
+          group,
+          draft,
+          { previews: opts.previews, rebuild: opts.rebuildSequence, refresh: opts.refreshSequence },
+        );
+        if (draft.sequence.status === "failed") draft.warnings.push(`follow-up sequence not created: ${draft.sequence.error}`);
+      } catch (err) {
+        draft.warnings.push(`follow-up sequence not created: ${describeError(err)}`);
+      }
+      await save(draft);
+    }
     draft.status = "ready";
     return await save(draft);
   } catch (err) {

@@ -114,10 +114,69 @@ export interface CampaignDraft {
   docsFailed: string[]; // docs graph8 Studio failed to generate (ReplyIQ fills the ones it owns)
   generation: "complete" | "in_progress" | "unknown";
   timingNote?: string; // advisory: when to launch (e.g. after OOO return dates)
+  /** The follow-up emails, as a graph8 Sequencer DRAFT (no sender attached, never run by ReplyIQ). */
+  sequence?: SequenceDraft;
   warnings: string[];
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Result of fact-checking one email: deterministic checks plus a model audit against the allowed facts. */
+export interface EmailCheck {
+  ok: boolean;
+  issues: string[];
+  audited: boolean; // false when the model audit could not run (then `ok` rests on the deterministic checks)
+}
+
+/** A fact an email may state: verbatim from a company document. */
+export interface EmailFact {
+  claim: string;
+  excerpt: string;
+  source: string; // document name
+}
+
+export interface SequenceDraft {
+  status: "ready" | "failed";
+  sequenceId?: string;
+  sequenceName?: string;
+  ownerEmail?: string;
+  /** Step 1 is written per contact by graph8's AI at send time; step 2 is ReplyIQ's checked text. */
+  steps: { order: number; inputType: "ON_DEMAND" | "MANUAL_TEMPLATE"; delayDays: number; subject?: string }[];
+  instructions: string; // what graph8's AI is told for step 1
+  facts: EmailFact[]; // the only product facts either email may state
+  doNotClaim: string[]; // proof gaps: never claimed
+  originalRules: string[]; // rules carried over from the original campaign's AI steps
+  manualEmail?: { subject: string; body: string; check: EmailCheck; attempts: number };
+  /** graph8's AI drafts of step 1 for a few contacts (nothing sent), each fact-checked by ReplyIQ. */
+  previews?: { contactId: number; email: string; subject: string; body: string; check: EmailCheck }[];
+  previewCredits?: number; // graph8's own estimate for the previews
+  verified: boolean; // read back from graph8 after creation
+  senderAttached: false; // ReplyIQ never attaches a sender: a person does, then launches
+  warnings: string[];
+  error?: string;
+  updatedAt: string;
+}
+
+/** Suggested additions to company-wide Studio documents, applied only after a person approves. */
+export interface StudioLearnings {
+  status: "proposed" | "applied" | "removed" | "failed";
+  proposedAt: string;
+  appliedAt?: string;
+  removedAt?: string;
+  proposals: {
+    docId: string;
+    docName: string;
+    kind: "messaging" | "proof";
+    key: string; // block key: one block per source campaign, replaced (not duplicated) on re-runs
+    section: string; // the exact text to add
+    action: "append" | "replace" | "unchanged";
+    baseVersion?: number;
+    savedVersion?: number;
+    /** The document exactly as it was before ReplyIQ's first save (local only; data/runs is gitignored). */
+    backup?: string;
+  }[];
+  error?: string;
 }
 
 export type StepName = "load" | "fetch" | "classify" | "themes" | "tag" | "resolve" | "cards";
@@ -151,6 +210,8 @@ export interface Run {
   audience?: { eligible: number; excluded: Partial<Record<ExclusionReason, number>> };
   /** M4 Answer Card summary. */
   cards?: { generated: number; failed: number; verifiedProof: number; unverifiedClaims: number };
+  /** Suggested company-wide Studio additions (proposed from the Answer Cards; saved only after approval). */
+  learnings?: StudioLearnings;
   groups: Group[];
   errors: string[];
 }
@@ -177,4 +238,6 @@ export interface StudioDoc {
   fileType?: string;
   category?: string;
   content: string;
+  version?: number; // bumps on every save (graph8 keeps a DocumentVersion per save)
+  updatedAt?: string;
 }

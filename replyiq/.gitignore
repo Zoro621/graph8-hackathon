@@ -43,6 +43,7 @@ next-env.d.ts
 
 # ReplyIQ run state
 /data/runs/*
+/data/e2e/
 !/data/runs/.gitkeep
 
 # Live graph8 samples from `npm run spike` (may contain real contact data: never commit)

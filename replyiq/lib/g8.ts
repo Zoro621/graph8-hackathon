@@ -47,6 +47,8 @@ export interface SequenceDetail extends SequenceListItem {
   description: string | null;
   finish_on_reply: boolean;
   pinned_mailbox_id: number | null;
+  send_in_same_thread?: boolean;
+  textual_agent_name?: string | null;
 }
 
 export interface SequenceStats {
@@ -109,6 +111,13 @@ export interface SuppressionStatus {
 
 export type Mailbox = Record<string, unknown> & { id?: number; connection_status?: string; is_archived?: boolean };
 
+export interface CreditBalance {
+  credits?: number;
+  held_credits?: number;
+  available_credits?: number;
+  total_used?: number;
+}
+
 export interface CampaignDocument {
   id: string;
   file_type?: string;
@@ -118,6 +127,55 @@ export interface CampaignDocument {
   version?: number;
   content?: string;
   meta_data?: { content?: string };
+}
+
+/**
+ * One sequence step (POST /sequences `steps[]`). ON_DEMAND: graph8's AI writes each contact's email at
+ * send time from `instructions` (hand-written copy is refused on these). MANUAL_TEMPLATE: fixed copy.
+ */
+export interface SequenceStepConfig {
+  step_order: number;
+  step_type: "EMAIL";
+  input_type: "ON_DEMAND" | "MANUAL_TEMPLATE";
+  time_interval: number; // seconds after the previous step
+  step_data: { instructions?: string; subject?: string; body?: string; email_type?: "html" | "text" };
+}
+
+/** POST /sequences body. No channels: a sequence without a sender cannot send. */
+export interface SequenceCreateBody {
+  name: string;
+  description?: string;
+  user_email: string;
+  finish_on_reply?: boolean;
+  send_in_same_thread?: boolean;
+  wait_for_new_contacts?: boolean;
+  associated_list_id?: number;
+  campaign_id?: string;
+  steps?: SequenceStepConfig[];
+}
+
+/** POST /sequencer/content/email/{estimate,generate} body: graph8's AI drafting ONE contact's email. */
+export interface EmailDraftBody {
+  contact_id: number;
+  contact_work_email: string;
+  first_name: string;
+  last_name: string;
+  instructions: string;
+  lead_info: string;
+  agent_name: string;
+  studio_campaign_id?: string;
+  sequence_id?: string;
+  step_order?: number;
+  provider?: string;
+  model?: string;
+}
+
+export interface EmailDraftEstimate {
+  estimated_credits?: number;
+  capped?: boolean;
+  cap?: number;
+  model?: string;
+  cached?: boolean;
 }
 
 /** POST /campaigns body (field limits from the docs: name 255, category 100, persona 200, goal 255). */
@@ -230,13 +288,27 @@ const MAX_PAGES = 50;
 const SEARCH_PAGE_SIZE = 50;
 
 export function createG8Client(opts: G8ClientOptions) {
-  const call = async <T>(path: string, o: Omit<RequestOptions, "fetchImpl" | "sleepImpl"> = {}) =>
+  const send = <T>(path: string, o: Omit<RequestOptions, "fetchImpl" | "sleepImpl">) =>
     request<T>(opts.base, path, opts.apiKey, {
       maxRetries: opts.maxRetries ?? 2,
       ...o,
       ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       ...(opts.sleepImpl ? { sleepImpl: opts.sleepImpl } : {}),
     });
+  const sleep = opts.sleepImpl ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  // graph8 returned a spurious 401 "Invalid API key" under a burst of parallel requests (27 Sep; the same
+  // key succeeded right before and after). Reads (GETs, and POST searches flagged `read`) are retried once;
+  // writes never are, and a key that is really invalid fails again.
+  const call = async <T>(path: string, o: Omit<RequestOptions, "fetchImpl" | "sleepImpl"> = {}, read = (o.method ?? "GET") === "GET") => {
+    try {
+      return await send<T>(path, o);
+    } catch (err) {
+      if (!(err instanceof G8Error && err.status === 401) || !read) throw err;
+      await sleep(1000);
+      return send<T>(path, o);
+    }
+  };
 
   const get = async <T>(path: string, query?: Record<string, unknown>) =>
     (await call<Envelope<T>>(path, { query })).data;
@@ -349,7 +421,7 @@ export function createG8Client(opts: G8ClientOptions) {
             query: { page, page_size: SEARCH_PAGE_SIZE },
             body: { mailboxes: [mailbox], ...(campaignIds.length ? { campaign_ids: campaignIds } : {}) },
             maxRetries: opts.maxRetries ?? 2,
-          });
+          }, true);
           const items = res.data?.items ?? [];
           for (const t of items.map(fromSearchItem)) if (!byId.has(t.id)) byId.set(t.id, t);
           seen += items.length;
@@ -482,6 +554,36 @@ export function createG8Client(opts: G8ClientOptions) {
 
     // ---------- mailboxes ----------
     listMailboxes: () => get<Mailbox[]>("/mailboxes"),
+
+    // ---------- follow-up sequences (writes guarded by write()) ----------
+    /** Create a DRAFT sequence. Nothing sends: no channel is attached and it is never run here. */
+    createSequence: (body: SequenceCreateBody, idempotencyKey?: string) =>
+      client.write<{ id: string; name?: string; status?: string }>("POST", "/sequences", body, idempotencyKey),
+    /** Change one step of a (draft) sequence. */
+    updateSequenceStep: (sequenceId: string, stepId: string, patch: Partial<Pick<SequenceStepConfig, "step_type" | "input_type" | "time_interval" | "step_data">>) =>
+      client.write("PATCH", `/sequences/${encodeURIComponent(sequenceId)}/steps/${encodeURIComponent(stepId)}`, patch),
+    /** Append steps to a (draft) sequence. */
+    addSequenceSteps: (sequenceId: string, steps: SequenceStepConfig[]) => client.write("POST", `/sequences/${encodeURIComponent(sequenceId)}/steps`, { steps }),
+    /** Price graph8's AI drafting one email. Free (a POST, but spends nothing and saves nothing). */
+    estimateEmailDraft: async (body: EmailDraftBody) =>
+      (await call<Envelope<EmailDraftEstimate>>("/sequencer/content/email/estimate", { method: "POST", body }, true)).data,
+    /** graph8's AI drafts one contact's email now. SPENDS CREDITS; nothing is saved or sent. Guarded like a write. */
+    generateEmailDraft: async (body: EmailDraftBody) => extractEmailDraft(await client.write<unknown>("POST", "/sequencer/content/email/generate", body)),
+
+    // ---------- Studio Global documents ----------
+    async getGlobalDoc(id: string): Promise<StudioDoc> {
+      return toStudioDoc((await get<Record<string, unknown>>(`/global-context/documents/${encodeURIComponent(id)}`)) ?? {});
+    },
+    /** Save a company-wide Studio document. graph8 records a version per save, but a document's FIRST save becomes version 1 itself (observed 27 Sep). */
+    updateGlobalDoc: (id: string, content: string) =>
+      client.write<Record<string, unknown>>("PATCH", `/global-context/documents/${encodeURIComponent(id)}`, { content }),
+
+    // ---------- credits ----------
+    /** Credit balance (read-only). Accepts the enveloped and the bare response shape. */
+    async getUsage(): Promise<CreditBalance> {
+      const res = await call<Envelope<CreditBalance> & CreditBalance>("/usage");
+      return res?.data ?? res;
+    },
   };
   return client;
 }
@@ -504,6 +606,21 @@ export function g8(): G8Client {
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+/**
+ * Subject + body from POST /sequencer/content/email/generate. The spec only says "returns the subject
+ * and body", so accept them at the top level or under a nested `email` / `draft` / `content` object.
+ */
+export function extractEmailDraft(raw: unknown): { subject: string; body: string } {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  for (const c of [o, o.email, o.draft, o.content, o.result]) {
+    const x = (c ?? {}) as Record<string, unknown>;
+    const subject = str(x.subject);
+    const body = str(x.body) ?? str(x.html) ?? str(x.text);
+    if (subject || body) return { subject: subject ?? "", body: body ?? "" };
+  }
+  throw new Error(`graph8 returned no email draft (keys: ${Object.keys(o).join(", ") || "none"})`);
 }
 
 function num(v: unknown): number | undefined {
@@ -579,6 +696,9 @@ export function toStudioDoc(raw: Record<string, unknown>): StudioDoc {
     fileType: str(raw.file_type),
     category: str(raw.category),
     content: str(raw.content) ?? str(meta.content) ?? "",
+    // current_version counts saves; version stayed 1 across saves (observed 27 Sep)
+    ...(typeof raw.current_version === "number" ? { version: raw.current_version } : typeof raw.version === "number" ? { version: raw.version } : {}),
+    ...(str(raw.updated_at) ? { updatedAt: str(raw.updated_at) } : {}),
   };
 }
 
