@@ -4,6 +4,7 @@
 export type Category =
   | "interested_no_meeting"
   | "meeting_request"
+  | "meeting_booked"
   | "pricing_request"
   | "price_objection"
   | "timing_not_now"
@@ -24,8 +25,10 @@ export interface Reply {
   company?: string;
   subject?: string;
   outbound?: string; // first message with responder USER or AI
-  replyText: string; // latest message with responder OTHER
+  replyText: string; // latest message with responder OTHER, quoted history stripped
   repliedAt?: string;
+  conversation: { from: "us" | "prospect"; text: string; date?: string }[]; // last messages, oldest first
+  summary?: string; // graph8's own thread summary, when present
   existingTags: { id: string; name: string }[];
 }
 

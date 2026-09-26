@@ -13,7 +13,7 @@ Create `.env.local` in this folder. It is gitignored, so never commit it:
 ```
 G8_API_BASE=https://be.graph8.com/api/v1
 G8_API_KEY=                          # graph8 personal key (Profile -> Developer)
-G8_WRITE_ORG_ID=                     # leave EMPTY until graph8 confirms writes are OK on this org (see below)
+G8_WRITE_ORG_ID=                     # optional: allow writes on one more org (the sandbox org is already allowed)
 OPENAI_API_KEY=                      # OpenAI platform key
 OPENAI_CLASSIFY_MODEL=gpt-6-luna
 OPENAI_REASON_MODEL=gpt-6-sol
@@ -53,11 +53,21 @@ data/runs/          run state as JSON (gitignored)
 - `tests/fixtures/live/`: **gitignored**. Everything `npm run spike` read, including anonymised real replies that still contain phone numbers. Never commit it.
 
 ## Writes to graph8 (fail closed)
-`/sandbox/status` returns 404 for this key ("available only in the developer sandbox environment"). The key runs on production against the seeded hackathon org `org_87325c23062e`. So every write (tags, lists, campaigns) is **refused** unless:
+The hackathon key acts on the **sandbox organisation `org_87325c23062e`**, which the team confirmed on 26 Sep. Its `/sandbox/status` returns 404 (that endpoint exists only on graph8's separate sandbox environment), so the org is allowlisted in `lib/config.ts`. Every write (tags, lists, campaigns) checks, before sending, that:
 1. `/sandbox/status` reports `sandbox: true`, or
-2. `G8_WRITE_ORG_ID` in `.env.local` equals the key's org (read from `/roles/me/permissions`).
+2. the key's org (from `/roles/me/permissions`) is in the allowlist (`lib/config.ts` plus optional `G8_WRITE_ORG_ID`).
 
-Only set option 2 after a graph8 engineer confirms writes are fine on this org. `npm run spike` prints the current policy.
+Any other org is refused and nothing is sent. `npm run spike` prints the current policy.
+
+## Where the real data is
+| Sequence | Inbox | Replies | What they are |
+|---|---|---|---|
+| `[Full copy] Kill Your Tool Stack — Tech SMB Sales v2` (`e470a095…`) | `campaign-saad@example.com`, workspace "Graph8 Tech SMB Sales — full campaign" | 19 | **The graph8 team's real SMB campaign** (7,111 contacts, 2,136 sent). Out of office, "left the company, contact X", not interested, bounces, and one full conversation ending in a booked meeting. |
+| `[DEMO] Product introduction history` (`90bda420…`) | `hackathon-saad@example.com` | 10 | Synthetic: pricing, remove me, demo, follow-up, OOO, not interested |
+| `[DEMO] Follow-up outcome history` (`96118ffd…`) | same | 2 | Synthetic |
+| `[Hackathon copy] … v2` (`90145145…`) | same | 9 | Placeholders ("original reply omitted") |
+
+No graph8 Workflows exist in the org yet (`GET /workflows` returns 0). SMS: 0 threads. LinkedIn: HeyReach not configured.
 
 ## Safety
 - Keys stay in server code only.

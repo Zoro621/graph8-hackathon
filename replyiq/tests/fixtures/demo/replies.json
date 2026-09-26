@@ -10,6 +10,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
     "repliedAt": "2026-09-25T00:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T23:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+        "date": "2026-09-25T00:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
     "existingTags": []
   },
   {
@@ -23,6 +36,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Out of office in this training scenario.",
     "repliedAt": "2026-09-24T23:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T22:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Out of office in this training scenario.",
+        "date": "2026-09-24T23:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Out of office in this training scenario.",
     "existingTags": []
   },
   {
@@ -36,6 +62,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
     "repliedAt": "2026-09-24T14:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T13:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+        "date": "2026-09-24T14:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
     "existingTags": []
   },
   {
@@ -49,6 +88,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
     "repliedAt": "2026-09-24T16:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T15:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+        "date": "2026-09-24T16:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
     "existingTags": []
   },
   {
@@ -62,6 +114,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
     "repliedAt": "2026-09-24T22:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T21:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+        "date": "2026-09-24T22:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
     "existingTags": []
   },
   {
@@ -75,6 +140,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
     "repliedAt": "2026-09-24T20:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T19:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+        "date": "2026-09-24T20:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
     "existingTags": []
   },
   {
@@ -88,6 +166,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
     "repliedAt": "2026-09-24T18:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T17:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+        "date": "2026-09-24T18:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
     "existingTags": []
   },
   {
@@ -101,6 +192,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
     "repliedAt": "2026-09-24T19:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T18:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+        "date": "2026-09-24T19:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
     "existingTags": []
   },
   {
@@ -114,6 +218,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Out of office in this training scenario.",
     "repliedAt": "2026-09-24T17:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T16:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Out of office in this training scenario.",
+        "date": "2026-09-24T17:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Out of office in this training scenario.",
     "existingTags": []
   },
   {
@@ -127,6 +244,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Not interested at this time.",
     "repliedAt": "2026-09-24T21:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T20:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Not interested at this time.",
+        "date": "2026-09-24T21:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Not interested at this time.",
     "existingTags": []
   },
   {
@@ -140,6 +270,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Not interested at this time.",
     "repliedAt": "2026-09-24T15:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T14:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Not interested at this time.",
+        "date": "2026-09-24T15:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Not interested at this time.",
     "existingTags": []
   },
   {
@@ -153,6 +296,19 @@
     "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
     "replyText": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
     "repliedAt": "2026-09-24T13:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T12:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+        "date": "2026-09-24T13:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
     "existingTags": []
   }
 ]

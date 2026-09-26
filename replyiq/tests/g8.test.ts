@@ -100,19 +100,41 @@ describe("write policy (fails closed)", () => {
     await expect(c.assertWriteAllowed()).resolves.toMatchObject({ allowed: true, via: "sandbox", orgId: "org_sb" });
   });
 
-  it("refuses writes off-sandbox when G8_WRITE_ORG_ID is not set", async () => {
+  it("refuses writes off-sandbox when the allowlist is empty", async () => {
     const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me() });
     await expect(c.assertWriteAllowed()).rejects.toBeInstanceOf(WriteNotAllowedError);
   });
 
-  it("refuses writes when G8_WRITE_ORG_ID is a different org", async () => {
-    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me("org_other") }, { writeOrgId: "org_live" });
-    await expect(c.assertWriteAllowed()).rejects.toThrow(/does not match/);
+  it("refuses writes when the key's org is not in the allowlist", async () => {
+    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me("org_other") }, { writeOrgIds: ["org_live"] });
+    await expect(c.assertWriteAllowed()).rejects.toThrow(/not in the write allowlist/);
   });
 
-  it("allows writes only when G8_WRITE_ORG_ID matches the key's org", async () => {
-    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me("org_live") }, { writeOrgId: "org_live" });
+  it("allows writes only when the key's org is allowlisted", async () => {
+    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me("org_live") }, { writeOrgIds: ["org_live"] });
     await expect(c.assertWriteAllowed()).resolves.toMatchObject({ allowed: true, via: "org_allowlist" });
+  });
+
+  it("the shipped allowlist is exactly the confirmed hackathon sandbox org", async () => {
+    const { SANDBOX_ORG_IDS } = await import("../lib/config");
+    expect(SANDBOX_ORG_IDS).toEqual(["org_87325c23062e"]);
+  });
+
+  it("an allowed write is sent with an idempotency key", async () => {
+    let idem = "";
+    const { c } = client(
+      {
+        "GET /sandbox/status": notSandbox,
+        "GET /roles/me/permissions": me("org_live"),
+        "POST /inbox/tags": (_u, init) => {
+          idem = new Headers(init.headers).get("idempotency-key") ?? "";
+          return json({ data: {} }, 201);
+        },
+      },
+      { writeOrgIds: ["org_live"] },
+    );
+    await c.write("POST", "/inbox/tags", { name: "x" }, "run1:tag:x");
+    expect(idem).toBe("run1:tag:x");
   });
 
   it("a refused write never reaches the network", async () => {

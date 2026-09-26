@@ -41,6 +41,22 @@ describe("threadToReply", () => {
     expect(r).toMatchObject({ threadId: "t1", contactId: 5, contactEmail: "p@example.com", outbound: "our pitch", replyText: "second reply" });
   });
 
+  it("keeps the recent conversation, oldest first, with quotes stripped", () => {
+    const r = threadToReply(
+      thread([
+        msg("USER", "<html><head><style>body{margin:0}</style></head><body><p>our pitch</p></body></html>", "2026-09-24T10:00:00Z"),
+        msg("OTHER", "Happy to chat.\nOn Mon Dan wrote:\n> our pitch", "2026-09-24T11:00:00Z"),
+        msg("USER", "Booked for 1pm", "2026-09-24T12:00:00Z"),
+      ]),
+      "seq1",
+    );
+    expect(r?.conversation).toEqual([
+      { from: "us", text: "our pitch", date: "2026-09-24T10:00:00Z" },
+      { from: "prospect", text: "Happy to chat.", date: "2026-09-24T11:00:00Z" },
+      { from: "us", text: "Booked for 1pm", date: "2026-09-24T12:00:00Z" },
+    ]);
+  });
+
   it("returns null when the prospect never replied", () => {
     expect(threadToReply(thread([msg("USER", "pitch", "2026-09-24T10:00:00Z")]), "seq1")).toBeNull();
   });

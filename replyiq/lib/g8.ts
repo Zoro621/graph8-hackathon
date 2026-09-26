@@ -2,6 +2,7 @@
 // Built on @graph8/sdk request(): retries 429/5xx/network with backoff, honours Retry-After,
 // adds Idempotency-Key on writes, and throws G8Error on non-2xx.
 import { G8Error, request, type RequestOptions } from "@graph8/sdk";
+import { SANDBOX_ORG_IDS } from "./config";
 import { getEnv } from "./env";
 import type { StudioDoc } from "./types";
 
@@ -140,8 +141,8 @@ export class WriteNotAllowedError extends Error {
 export interface G8ClientOptions {
   base: string;
   apiKey: string;
-  /** Explicit opt-in: writes are allowed on this org even when /sandbox/status is unavailable. */
-  writeOrgId?: string;
+  /** Orgs where writes are allowed even when /sandbox/status is unavailable (sandbox orgs on production). */
+  writeOrgIds?: readonly string[];
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
   maxRetries?: number;
@@ -181,7 +182,7 @@ export function createG8Client(opts: G8ClientOptions) {
     /**
      * Decide whether writes are allowed. Fails closed:
      * 1. /sandbox/status says sandbox=true, or
-     * 2. the key's org (from /roles/me/permissions) equals the explicit G8_WRITE_ORG_ID opt-in.
+     * 2. the key's org (from /roles/me/permissions) is in the allowlist (lib/config.ts + G8_WRITE_ORG_ID).
      */
     async writePolicy(): Promise<WritePolicy> {
       if (policyCache) return policyCache;
@@ -192,18 +193,12 @@ export function createG8Client(opts: G8ClientOptions) {
         if (!(err instanceof G8Error && err.status === 404)) throw err; // 404 = not the sandbox environment
       }
       const me = await client.whoAmI();
-      if (!opts.writeOrgId) {
+      const allow = opts.writeOrgIds ?? [];
+      if (!me?.org_id || !allow.includes(me.org_id)) {
         return (policyCache = {
           allowed: false,
-          orgId: me.org_id,
-          reason: `this key is not on the graph8 developer sandbox (org ${me.org_id}) and G8_WRITE_ORG_ID is not set`,
-        });
-      }
-      if (opts.writeOrgId !== me.org_id) {
-        return (policyCache = {
-          allowed: false,
-          orgId: me.org_id,
-          reason: `G8_WRITE_ORG_ID (${opts.writeOrgId}) does not match this key's org (${me.org_id})`,
+          orgId: me?.org_id,
+          reason: `org ${me?.org_id ?? "?"} is not the graph8 developer sandbox and is not in the write allowlist (${allow.join(", ") || "empty"})`,
         });
       }
       return (policyCache = { allowed: true, via: "org_allowlist", orgId: me.org_id });
@@ -337,7 +332,8 @@ let defaultClient: G8Client | undefined;
 export function g8(): G8Client {
   if (!defaultClient) {
     const env = getEnv();
-    defaultClient = createG8Client({ base: env.G8_API_BASE, apiKey: env.G8_API_KEY, writeOrgId: env.G8_WRITE_ORG_ID });
+    const writeOrgIds = [...SANDBOX_ORG_IDS, ...(env.G8_WRITE_ORG_ID ? [env.G8_WRITE_ORG_ID] : [])];
+    defaultClient = createG8Client({ base: env.G8_API_BASE, apiKey: env.G8_API_KEY, writeOrgIds });
   }
   return defaultClient;
 }

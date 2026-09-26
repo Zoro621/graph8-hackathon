@@ -1,6 +1,10 @@
 import type { G8Client, Thread, ThreadMessage } from "../g8";
 import type { Reply } from "../types";
 
+// How much of each thread the classifier sees.
+const CONVERSATION_MESSAGES = 8;
+const CONVERSATION_CHARS = 600;
+
 const time = (m: ThreadMessage) => {
   const t = Date.parse(m.date ?? "");
   return Number.isNaN(t) ? 0 : t;
@@ -12,7 +16,7 @@ export function toPlainText(html: string | null | undefined): string {
   return html
     .replace(/<\s*br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr)>/gi, "\n")
-    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<(head|style|script|title)[\s\S]*?<\/\1>/gi, "")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -73,6 +77,15 @@ export function threadToReply(thread: Thread, sequenceId: string): Reply | null 
     outbound: outbound ? toPlainText(outbound.content) : undefined,
     replyText: stripQuoted(full) || full,
     repliedAt: latest.date ?? undefined,
+    conversation: messages.slice(-CONVERSATION_MESSAGES).map((m) => {
+      const text = toPlainText(m.content);
+      return {
+        from: m.responder === "OTHER" ? ("prospect" as const) : ("us" as const),
+        text: (stripQuoted(text) || text).slice(0, CONVERSATION_CHARS),
+        date: m.date ?? undefined,
+      };
+    }),
+    summary: thread.summary ?? undefined,
     existingTags: thread.tags,
   };
 }
