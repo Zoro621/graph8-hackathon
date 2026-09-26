@@ -35,22 +35,22 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 **Location:** `D:\GitHub\graph8\replyiq\`. This folder becomes the **public GitHub repo**; the research notes stay private.
 
 ```bash
-npx create-next-app@latest replyiq --ts --app --eslint --tailwind --src-dir=false --import-alias "@/*"
+npx create-next-app@16.3.6 replyiq --ts --app --eslint --tailwind --no-src-dir --import-alias "@/*" --use-npm --disable-git --yes
 ```
 ```bash
-npm i @anthropic-ai/sdk @graph8/sdk zod nanoid
+npm i @google/genai @graph8/sdk zod nanoid
 ```
 ```bash
-npm i -D tsx vitest
+npm i -D @types/node@^22 @next/env@16.3.6 tsx vitest
 ```
 
-`.env.local` (gitignored; `.env.example` gets committed with empty values):
+`.env.local` (gitignored; the variables are also listed in `replyiq/README.md`):
 ```
 G8_API_BASE=https://be.graph8.com/api/v1
 G8_API_KEY=            # sandbox PERSONAL key (an org key can see an empty inbox)
-ANTHROPIC_API_KEY=
-CLASSIFY_MODEL=claude-sonnet-5
-REASON_MODEL=claude-opus-5-5
+GEMINI_API_KEY=        # Google AI Studio key
+GEMINI_CLASSIFY_MODEL=gemini-3.5-flash-lite
+GEMINI_REASON_MODEL=gemini-3.8-flash
 ENABLE_LAUNCH=false
 MIN_GROUP_SIZE=2
 ```
@@ -67,7 +67,7 @@ replyiq/
     types.ts            # shared types (§4)
     g8.ts               # graph8 HTTP client + one function per endpoint (§5)
     taxonomy.ts         # categories, labels, hard-stop + follow-up rules (§6)
-    claude.ts           # classify(), answerCard(), campaignBrief() via tool-use (§7)
+    gemini.ts           # classify(), answerCard(), campaignBrief() via JSON-schema output (§7)
     grounding.ts        # verifyProof(): substring check against Studio docs (§8)
     store.ts            # data/runs/{runId}.json read/write
     pipeline/
@@ -237,29 +237,31 @@ The pricing group is the main Answer Card demo.
 
 ---
 
-## 7. Claude calls (`lib/claude.ts`)
-- **Structured output:** use `@anthropic-ai/sdk` `messages.create` with one tool whose `input_schema` is the output shape, and `tool_choice: {type:'tool', name}`. The output is validated with zod; one retry with the error text if validation fails.
-- **Prompt caching:** the system prompts and the Studio docs block get `cache_control` so they're cached across groups.
+## 7. Gemini calls (`lib/gemini.ts`)
+- **SDK:** `@google/genai` (v2.24). `const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY })`.
+- **Structured output:** `ai.models.generateContent({ model, contents, config: { systemInstruction, responseMimeType: 'application/json', responseJsonSchema: <JSON schema>, temperature: 0.2 } })`. Read `response.text`, `JSON.parse` it, and validate with zod (`z.toJSONSchema()` produces the schema from the same zod type). One retry with the validation error if it fails. (`responseJsonSchema` and `.text` were checked in the installed SDK's typings.)
+- **Models** (Google's model list, 26 Sep 2026): `gemini-3.5-flash-lite` for classification (fast, cheap) and `gemini-3.8-flash` (latest stable Flash) for Answer Cards and briefs. Both are set in the env so they can be swapped without code changes.
+- **Errors:** retry 429/503 twice with backoff; mark the step failed after that.
 
-### 7.1 `classify(replies[])` → `CLASSIFY_MODEL`, batches of 20
+### 7.1 `classify(replies[])` → `GEMINI_CLASSIFY_MODEL`, batches of 20
 - **System prompt:** you label B2B cold-email replies. Use only the reply text. Pick exactly one category from the list, with its definitions (a copy of the table in §6). `quote` must be copied verbatim from the reply. If a reply asks to be removed, the category is `unsubscribe` even if it's polite.
-- **Tool `record_labels`:** `{labels: [{threadId, category (enum), confidence 0..1, quote, referredName?, revisitHint?}]}`
+- **Output schema `record_labels`:** `{labels: [{threadId, category (enum), confidence 0..1, quote, referredName?, revisitHint?}]}`
 - **Code checks after the call:**
   - every `threadId` was returned exactly once
   - `quote` is a substring of `replyText`; otherwise use the first 140 characters and set `confidence = min(confidence, 0.5)`
   - `needsReview = confidence < 0.6`
 
-### 7.2 `answerCard(group, docs, originalSteps)` → `REASON_MODEL`, one call per group
+### 7.2 `answerCard(group, docs, originalSteps)` → `GEMINI_REASON_MODEL`, one call per group
 - **Inputs:**
   - the group label and all its reply texts
   - the original outbound copy (from sequence steps)
   - the Studio docs whose `display_name` matches Proof Catalog, Pricing Matrix, Value Props, Messaging House, Positioning Matrix, Offer Brief or Pains And Gains, each wrapped in `<doc id="…" name="…">…</doc>` and trimmed to about 6k characters
 - **System prompt:** you write an Answer Card for a sales team. Only claim proof that appears verbatim in the provided docs. For each proof item, copy an exact excerpt of 8–40 words and its doc id. If the docs don't contain proof that answers the objection, say so in `proof_gap`. Don't invent numbers, customers or case studies.
-- **Tool `write_answer_card`:** `{summary, quotes[1..3], proof_we_have[{claim, source_doc_id, excerpt}], proof_gap|null, how_to_answer, email_angle}`
+- **Output schema `write_answer_card`:** `{summary, quotes[1..3], proof_we_have[{claim, source_doc_id, excerpt}], proof_gap|null, how_to_answer, email_angle}`
 - The result then goes through `verifyProof()` (§8).
 
-### 7.3 `campaignBrief(group, card, source)` → `REASON_MODEL`
-**Tool `write_campaign_fields`** returns fields within the API limits:
+### 7.3 `campaignBrief(group, card, source)` → `GEMINI_REASON_MODEL`
+**Output schema `write_campaign_fields`** returns fields within the API limits:
 - `{name ≤255, core_concept, primary_hook, target_persona ≤200, goal ≤255, brief}`
 - `brief` = a Markdown block with: why this audience exists (the group and its quotes), the Answer Card, the verified proof, the email angle, the timing note, and "Do not claim: <proof_gap>".
 
@@ -326,7 +328,7 @@ The spike does **not** create campaigns. The first campaign is created in M5 so 
 |---|---|---|---|
 | **M0** | Scaffold | create-next-app, deps, `env.ts`, `.env.example`, `git init`, create the public GitHub repo | `npm run dev` shows the page; the repo is pushed |
 | **M1** | graph8 client and spike | `g8.ts` core and read functions, `spike.ts` | all 8 checks print; fixtures saved |
-| **M2** | Fetch and classify (CLI) | `fetchReplies`, `taxonomy`, `claude.classify`, `store`, `scripts/run.ts` | `run.ts 90bda420…` prints groups matching §6; `taxonomy.test.ts` passes |
+| **M2** | Fetch and classify (CLI) | `fetchReplies`, `taxonomy`, `gemini.classify`, `store`, `scripts/run.ts` | `run.ts 90bda420…` prints groups matching §6; `taxonomy.test.ts` passes |
 | **M3** | Write-back and guards | `tagThreads`, `resolveContacts` | the tags appear in the **graph8 Inbox tag filter**; Inbox Analytics is no longer 0; unsubscribe/hard-no contacts are always excluded (tested) |
 | **M4** | Answer Cards | `answerCard`, `grounding` | the pricing card cites the real Pricing Matrix / Proof Catalog doc ids; `grounding.test.ts` passes (a fake excerpt moves to proof gap) |
 | **M5** | Draft campaign | `draftCampaign`, `campaignBrief` | a new campaign appears in **Studio → Campaign** with the ReplyIQ list as its audience and the Answer Card in its objection doc; note the real doc-generation time |

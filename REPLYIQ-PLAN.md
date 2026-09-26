@@ -92,17 +92,17 @@ Questions to ask the engineers in person:
 ---
 
 ## 3. Architecture
-- **Stack:** Next.js (App Router) and TypeScript, one repo. All graph8 and Anthropic calls run in server route handlers. Keys stay in `.env.local` (`G8_API_KEY`, `ANTHROPIC_API_KEY`) and never reach the client.
-- **LLM:** Anthropic SDK with tool-use JSON schemas for structured output.
-  - `claude-sonnet-5` for classification (fast and cheap, batches of 20).
-  - `claude-opus-5-5` for Answer Cards and campaign briefs.
+- **Stack:** Next.js (App Router) and TypeScript, one repo. All graph8 and Gemini calls run in server route handlers. Keys stay in `.env.local` (`G8_API_KEY`, `GEMINI_API_KEY`) and never reach the client.
+- **LLM:** Gemini via `@google/genai`, with JSON-schema structured output (`responseMimeType: application/json` + `responseJsonSchema`).
+  - `gemini-3.5-flash-lite` for classification (fast and cheap, batches of 20).
+  - `gemini-3.8-flash` for Answer Cards and campaign briefs.
 - **State:** one JSON file per run in `data/runs/{runId}.json`. No database.
 
 ```
 replyiq/
   scripts/spike.ts
   lib/g8.ts            # wraps @graph8/sdk request(); assertSandbox(); paginate inbox
-  lib/claude.ts        # classify(), answerCard(), campaignBrief()
+  lib/gemini.ts        # classify(), answerCard(), campaignBrief()
   lib/taxonomy.ts      # categories + hard-stop rules
   lib/pipeline/        # fetchReplies, classify, resolveContacts, answerCards, draftCampaign, launch
   lib/store.ts         # run JSON read/write
