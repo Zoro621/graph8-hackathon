@@ -8,6 +8,35 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M2 results (26 Sep, verified live)
+- **What it does:** load the source (discovered at runtime) → fetch its replies → classify each into one of 13 categories → group them. It writes nothing to graph8.
+- **Classifier** (`lib/pipeline/classify.ts`, `gpt-6-luna` via `lib/llm.ts`):
+  - It reads the whole conversation plus graph8's summary, not just the last message.
+  - It extracts `referredName` (the person to contact instead) and `revisitHint` (a return date).
+  - Built so it can't silently break:
+    - strict JSON schema, re-validated with zod
+    - exactly one label per reply (missing ones are retried alone, then fall back to "needs review")
+    - unknown or duplicate IDs are ignored
+    - quotes must be verbatim (ignoring case, quote marks, dashes, broken `U+FFFD` characters), otherwise the confidence is capped at 0.5 and the reply is flagged for review
+    - placeholder or empty replies never reach the model
+    - phone numbers are stripped before sending
+    - a model failure fails the step instead of leaving partial labels
+- **Run state** (`lib/store.ts`): one JSON file per run in `data/runs/` (gitignored). Writes are atomic, the IDs are validated so no path can escape the folder, and corrupt files are skipped. The runner (`lib/pipeline/runPipeline.ts`) saves after every step and never throws; failures are recorded on the step.
+- **Live result on the graph8 Tech SMB Sales campaign** (19 replies, 1 LLM call, about 8k in / 2.4k out tokens, 0 need review):
+
+  | Group | Count | Notes |
+  |---|---|---|
+  | Meeting booked | 1 | caught from the thread even though the last message is a time correction |
+  | Referral | 6 | named people extracted (Kurt Huegin, Jeff Evans, Rob Moore, Claudia Boehringer, Steve Pinchotti…) |
+  | Out of office | 8–9 | return dates extracted |
+  | Hard no | 1 | |
+  | Needs review | 2 | dead address, generic auto-reply |
+
+  The `[DEMO]` sequence gives: meeting request 1, interested 2, pricing 2, OOO 1, hard no 2, unsubscribe 2.
+- **Tests:**
+  - **77 offline:** taxonomy rules, every classifier edge case, the store, and pipeline integration with a fake org and fake LLM (success, graph8 failure, LLM failure, empty source, zero replies, `--limit`, warnings, and the step progression a polling UI sees).
+  - **15 live:** 10 hand-written hard cases (booked-meeting thread, referral with name, OOO with date, unsubscribe, competitor, price objection, timing, pricing, hard no, bounce), the 6 demo reply types, and end to end on every discovered source, checking general rules plus "no writes". Stable across 3 consecutive runs (45/45).
+
 ## M1 results (26 Sep, verified live)
 - **The graph8 client is built on the SDK's `request()`.** It accepts `{method, body, headers, query, idempotencyKey, maxRetries}`; retries 429/5xx/network, honouring `Retry-After`; and adds an `Idempotency-Key` on writes. Checked in the installed SDK source.
 - **There's no sandbox environment for this key.** `/sandbox/status` returns **404** ("only in the developer sandbox environment"). The key acts on production, org `org_87325c23062e` (role admin), which holds the seeded hackathon data. The team confirmed this org is the hackathon sandbox, so it's allowlisted in `replyiq/lib/config.ts`. **Writes still fail closed for any other org**: they're allowed only if sandbox status is true, or if the key's org (from `GET /roles/me/permissions`) is in that allowlist (plus optional `G8_WRITE_ORG_ID`).

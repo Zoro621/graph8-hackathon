@@ -8,6 +8,9 @@ export function scrubText(s: string): string {
   return s.replace(EMAIL, (m) => (SAFE_EMAIL.test(m) ? m : "redacted@example.com")).replace(PHONE, "[phone]");
 }
 
+/** Phone numbers only: used before sending text to the LLM (it never needs them). */
+export const scrubPhones = (s: string) => s.replace(PHONE, "[phone]");
+
 /** Deep-scrub every string in a JSON-like value. */
 export function scrub<T>(value: T): T {
   if (typeof value === "string") return scrubText(value) as T;

@@ -33,10 +33,11 @@ npm run dev
 |---|---|---|
 | `npm run dev` | Start the app at http://localhost:3000 | M0 |
 | `npm run check-env` | Show which keys are set and validate the env | M0 |
-| `npm test` | Unit tests (vitest) | M0 |
+| `npm test` | Offline unit + integration tests (fake graph8 + fake LLM), no keys needed | M0+ |
+| `npm run test:live` | Live integration tests: real graph8 + OpenAI, read-only (never writes to graph8) | M2 |
 | `npm run typecheck` | TypeScript check | M0 |
 | `npm run spike` | 20 read-only graph8 checks; saves samples (see below) | M1 |
-| `npm run run:cli -- <sequenceId>` | Run the pipeline from the terminal | M2 (not written yet) |
+| `npm run run:cli -- [--campaign <id> \| --sequence <id>] [--limit n]` | Run the pipeline (load → fetch → classify) and print the groups; saves `data/runs/<id>.json`. No selector = the source with the most replies. | M2 |
 
 ## Layout
 ```

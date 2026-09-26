@@ -36,8 +36,9 @@ export interface Classified extends Reply {
   category: Category;
   confidence: number; // 0..1; below 0.6 means needsReview
   quote: string; // short verbatim span from replyText
-  referredName?: string;
-  revisitHint?: string;
+  referredName?: string; // person the prospect pointed us to (referral / left the company)
+  revisitHint?: string; // e.g. OOO return date, "next quarter"
+  reason?: string; // one-line why, for the UI
   needsReview: boolean;
 }
 
@@ -79,13 +80,28 @@ export interface Group {
 export type StepName = "load" | "fetch" | "classify" | "tag" | "resolve" | "cards";
 export type StepState = "pending" | "running" | "done" | "failed" | "skipped";
 
+export type RunStatus = "running" | "done" | "failed";
+
 export interface Run {
   id: string;
   createdAt: string;
+  updatedAt: string;
+  status: RunStatus;
   orgId: string;
-  source: { sequenceId: string; name: string; stats?: unknown; steps?: unknown };
+  /** What was analysed: a Studio campaign (all its sequences) or a single sequence. */
+  source: {
+    selector: { campaignId: string } | { sequenceId: string };
+    name: string; // campaign name, or sequence name when standalone
+    campaignId: string | null;
+    sequences: { id: string; name: string; status: string | null }[];
+    audienceListId: number | null;
+    mailboxes: string[];
+    docs: string[]; // campaign doc kinds found (objections, replyTemplates, emails, brief)
+    warnings: string[];
+  };
   steps: Record<StepName, StepState>;
-  counts: { threads: number; prospectReplies: number; sequencerReplies?: number };
+  counts: { threads: number; prospectReplies: number; needsReview: number };
+  usage: { inputTokens: number; outputTokens: number; llmCalls: number };
   groups: Group[];
   errors: string[];
 }
