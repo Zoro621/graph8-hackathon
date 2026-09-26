@@ -1,4 +1,4 @@
-// Orchestrates a run: load -> fetch -> classify -> themes -> tag -> resolve (cards: M4). Every step's state and any error is persisted, and the function never throws for
+// Orchestrates a run: load -> fetch -> classify -> themes -> tag -> resolve -> cards. Every step's state and any error is persisted, and the function never throws for
 // a pipeline failure: the run file is the source of truth (the UI polls it).
 import type { G8Client } from "../g8";
 import { describeError, WriteNotAllowedError } from "../g8";
@@ -9,6 +9,8 @@ import { classifyReplies } from "./classify";
 import { groupReplies } from "./group";
 import { discoverThemes } from "./themes";
 import { resolveContacts } from "./resolveContacts";
+import { generateCards, wantsCard } from "./cards";
+import type { SourceDoc } from "./retrieve";
 import { tagThreads } from "./tagThreads";
 import { fetchSourceReplies, resolveSource, type SourceSelector } from "./sources";
 
@@ -18,6 +20,7 @@ export interface PipelineDeps {
   store: RunStore;
   classifyModel: string;
   themeModel?: string; // defaults to classifyModel
+  cardModel?: string; // defaults to themeModel, then classifyModel
   now?: () => Date;
   log?: (msg: string) => void;
 }
@@ -165,6 +168,44 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
       run.errors.push(...res.warnings.map((w) => `resolve: ${w}`));
       log(`  eligible ${res.eligible}, excluded ${JSON.stringify(res.excluded)}`);
     });
+
+    // Answer Cards for objection / interest groups. Non-critical: failures become warnings.
+    if (!run.groups.some(wantsCard)) {
+      run.steps.cards = "skipped";
+    } else {
+      run.steps.cards = "running";
+      await persist();
+      log("▶ cards");
+      try {
+        const docs: SourceDoc[] = Object.values(ctx.docs)
+          .filter((d): d is NonNullable<typeof d> => Boolean(d))
+          .map((d) => ({ id: d.id, name: `Campaign: ${d.name}`, kind: "campaign" as const, content: d.content }));
+        try {
+          const global = await deps.g8.listGlobalDocs();
+          docs.push(...global.filter((d) => d.content).map((d) => ({ id: d.id, name: d.displayName, kind: "global" as const, content: d.content })));
+        } catch (err) {
+          run.errors.push(`cards: Studio documents unavailable (${describeError(err)}); cards use campaign documents only`);
+        }
+        const res = await generateCards(run.groups, { llm: deps.llm, model: deps.cardModel ?? deps.themeModel ?? deps.classifyModel, docs });
+        run.groups = res.groups;
+        run.usage.inputTokens += res.usage.inputTokens;
+        run.usage.outputTokens += res.usage.outputTokens;
+        run.usage.llmCalls += res.usage.llmCalls;
+        run.errors.push(...res.warnings.map((w) => `cards: ${w}`));
+        const cards = run.groups.map((g) => g.card).filter((c): c is NonNullable<typeof c> => Boolean(c));
+        run.cards = {
+          generated: res.generated,
+          failed: res.failed,
+          verifiedProof: cards.reduce((n, c) => n + c.proofWeHave.length, 0),
+          unverifiedClaims: cards.reduce((n, c) => n + c.unverifiedClaims.length, 0),
+        };
+        run.steps.cards = res.generated === 0 ? "failed" : "done";
+        log(`  ${res.generated} card(s), ${run.cards.verifiedProof} verified proof point(s)`);
+      } catch (err) {
+        run.steps.cards = "failed";
+        run.errors.push(`cards: ${describeError(err)}`);
+      }
+    }
 
     run.status = "done";
   } catch {

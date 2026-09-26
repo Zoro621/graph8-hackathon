@@ -41,6 +41,7 @@ function fakeOrg(threads: Thread[], overrides: Partial<Record<keyof G8Client, un
     getSequenceChannels: async () => [{ channel_value: "a@example.com" }],
     listThreads: async () => threads,
     findContactByEmail: async () => null,
+    listGlobalDocs: async () => [{ id: "g1", displayName: "Proof Catalog", content: "We have 700M+ verified B2B contacts in the graph8 buyer graph database." }],
     getSuppression: async (id: number) => ({ contact_id: id, is_suppressed: false, active_channels: [], suppressions: [] }),
     ...overrides,
   } as unknown as G8Client;
@@ -160,7 +161,11 @@ describe("runPipeline (integration: sources + fetch + classify + themes + tag + 
     const run = await runPipeline({ g8: fakeOrg(threads), llm, store, classifyModel: "m" }, { selector: { campaignId: "c1" } });
 
     expect(run.status).toBe("done");
-    expect(run.steps).toEqual({ load: "done", fetch: "done", classify: "done", themes: "done", tag: "skipped", resolve: "done", cards: "pending" });
+    expect(run.steps).toEqual({ load: "done", fetch: "done", classify: "done", themes: "done", tag: "skipped", resolve: "done", cards: "done" });
+    // the pricing group (an Answer Card category) got a card; OOO / unsubscribe did not
+    expect(run.groups.find((g) => g.key === "pricing_request")?.card?.summary).toBe("s");
+    expect(run.groups.find((g) => g.key === "out_of_office")?.card).toBeUndefined();
+    expect(run.cards).toMatchObject({ generated: 1, failed: 0 });
     // resolve: hard stop (unsubscribe) excluded; pricing + OOO eligible (all share contact 7 -> deduped per group)
     const unsub = run.groups.find((g) => g.key === "unsubscribe")!;
     expect(unsub.eligible).toEqual([]);
@@ -175,7 +180,7 @@ describe("runPipeline (integration: sources + fetch + classify + themes + tag + 
     expect(run.orgId).toBe("org_test");
     expect(run.source).toMatchObject({ name: "SMB Campaign", campaignId: "c1", audienceListId: 100, mailboxes: ["a@example.com"], docs: ["objections"] });
     expect(run.counts).toEqual({ threads: 4, prospectReplies: 4, needsReview: 0 });
-    expect(run.usage.llmCalls).toBe(2); // 1 classify + 1 themes (only the 2-reply OOO group qualifies)
+    expect(run.usage.llmCalls).toBe(3); // 1 classify + 1 themes (the 2-reply OOO group) + 1 card (pricing)
     const ooo = run.groups.find((g) => g.key === "out_of_office")!;
     expect(ooo.themes?.[0].threadIds.sort()).toEqual(["t1", "t4"]);
     expect(ooo.replies.every((r) => r.themeId === ooo.themes?.[0].id)).toBe(true);

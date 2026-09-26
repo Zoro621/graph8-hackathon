@@ -8,6 +8,30 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M4 results (26 Sep, verified live)
+- **Answer Cards** (`lib/pipeline/cards.ts`, `gpt-6-sol`): one per objection or interest group (interested, pricing, price objection, not now, competitor, no need). Hard stops never get a card. Each card has:
+  - summary and verbatim quotes
+  - **proof we have** (each item names its source document)
+  - **proof gap**
+  - how to answer and email angle
+  - a note for each theme
+- **Retrieval, nothing hardcoded** (`lib/pipeline/retrieve.ts`): all Studio Global docs plus the campaign's own docs (Messaging & Objections, Reply Templates, …) are split at headings and paragraphs and ranked against the group's replies, reasons and themes with a small TF-IDF, within a 40k-character budget and at most 5 passages per doc. Proof-like and campaign docs get a mild boost, and the opening of the Proof Catalog is always included (it states what proof exists and what doesn't).
+- **Grounding:**
+  - every proof point must quote its document verbatim (at least 6 words); the code checks the excerpt against the **full document**, ignoring markdown formatting (`normLoose`)
+  - wrong or unknown doc IDs and invented excerpts go to `unverifiedClaims` and into the proof gap
+  - quotes must be verbatim from the group's replies, otherwise the classifier's verified quotes are used
+  - a card with no verified proof must state a gap
+  - a failed card is a warning; the run continues
+- **Live results:**
+  - `[DEMO]` pricing card: 4 verified proof points (Team Plan $99 unlimited users, 10k credits, $0.05 overage, free entry tier, custom enterprise). Gap: no credit-consumption breakdown or cost estimator.
+  - Price objection (per-seat vs contract lock-in): 4 verified ("no seat fees, ever", month-to-month, free search in parallel with an existing contract). Gap: no case study quantifying cost for a 40-person team.
+  - Competitor (ZoomInfo / Outreach / Apollo): 3 verified. Gap: no win/loss or displacement stories.
+  - **0 claims dropped** as unverified in these runs, about 10k tokens per card.
+- **The SMB campaign has no objection groups** (only referral, out of office, meeting booked, hard no, needs review), so its cards step is `skipped`. The richer replies the team will seed will produce cards with no code change.
+- **Tests:**
+  - 149 offline: retrieval ranking, budget and cap, passages verbatim; card grounding including markdown, invented excerpts, wrong or unknown docs, short or duplicate excerpts, forced gap, quote fallback, theme notes; only objection groups get cards; failures non-fatal; no documents
+  - 20 live: price and competitor cards on real Studio docs, every excerpt re-verified independently, 3 out of 3
+
 ## M3 results (26 Sep, verified live and in graph8's UI)
 - **Tagging** (`lib/pipeline/tagThreads.ts`): each reply gets its category tag in graph8 (`ReplyIQ · Referral`, …).
   - Only the categories present are created. Existing tags are reused by name; the create response has no ID, so the list is re-read.

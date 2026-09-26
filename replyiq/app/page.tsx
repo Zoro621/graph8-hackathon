@@ -7,7 +7,7 @@ const milestones = [
   ["M1", "graph8 client + spike", true],
   ["M2", "Fetch + classify replies", true],
   ["M3", "Tag threads + contact guards", true],
-  ["M4", "Answer Cards (grounded)", false],
+  ["M4", "Answer Cards (grounded)", true],
   ["M5", "Draft follow-up campaign", false],
   ["M6", "UI", false],
   ["M7", "Hardening + public repo", false],

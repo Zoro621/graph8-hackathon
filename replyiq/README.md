@@ -37,7 +37,7 @@ npm run dev
 | `npm run test:live` | Live integration tests with real graph8 + OpenAI. Read-only, except `tag.live` which tags the synthetic `[DEMO]` sequence in the sandbox org | M2–M3 |
 | `npm run typecheck` | TypeScript check | M0 |
 | `npm run spike` | 20 read-only graph8 checks; saves samples (see below) | M1 |
-| `npm run run:cli -- [--campaign <id> \| --sequence <id>] [--limit n] [--no-tag]` | Run the pipeline: load → fetch → classify → themes → **tag in graph8** → resolve the audience. Prints the groups and saves `data/runs/<id>.json`. No selector = the source with the most replies. `--no-tag` = read-only. | M2–M3 |
+| `npm run run:cli -- [--campaign <id> \| --sequence <id>] [--limit n] [--no-tag]` | Run the pipeline: load → fetch → classify → themes → **tag in graph8** → resolve the audience → **Answer Cards**. Prints the groups and saves `data/runs/<id>.json`. No selector = the source with the most replies. `--no-tag` = read-only. | M2–M3 |
 
 ## Layout
 ```

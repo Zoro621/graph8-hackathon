@@ -1,4 +1,4 @@
-// Run the ReplyIQ pipeline from the terminal: load -> fetch -> classify -> themes -> tag -> resolve.
+// Run the ReplyIQ pipeline from the terminal: load -> fetch -> classify -> themes -> tag -> resolve -> cards.
 // Usage: npm run run:cli -- [--campaign <id> | --sequence <id>] [--limit <n>] [--no-tag]
 //        (no selector = the source with the most replies, discovered at runtime)
 //        --no-tag: do not write ReplyIQ tags to graph8 (read-only run)
@@ -38,6 +38,7 @@ async function main() {
       store: createFileStore(),
       classifyModel: env.OPENAI_CLASSIFY_MODEL,
       themeModel: env.OPENAI_REASON_MODEL,
+      cardModel: env.OPENAI_REASON_MODEL,
       log: (m) => console.log(m),
     },
     { selector, limit, writeTags },
@@ -54,6 +55,17 @@ async function main() {
     const reasons: Record<string, number> = {};
     for (const e of g.excluded) reasons[e.reason] = (reasons[e.reason] ?? 0) + 1;
     if (Object.keys(reasons).length) console.log(`   excluded: ${Object.entries(reasons).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+    if (g.card) {
+      const c = g.card;
+      console.log(`   ┌ ANSWER CARD: ${c.summary}`);
+      for (const q of c.quotes) console.log(`   │ “${q.slice(0, 100)}”`);
+      for (const p of c.proofWeHave) console.log(`   │ ✓ ${p.claim}  [${p.sourceDocName}]\n   │     "${p.excerpt.slice(0, 110)}"`);
+      console.log(`   │ ⚠ proof gap: ${c.proofGap ?? "none"}`);
+      console.log(`   │ how to answer: ${c.howToAnswer}`);
+      console.log(`   │ email angle: ${c.emailAngle}`);
+      for (const n of c.themeNotes) console.log(`   │ ◆ ${n.label}: ${n.howToAnswer}`);
+      console.log(`   └ sources: ${c.sources.map((s) => s.name).join(", ")}`);
+    }
     for (const th of g.themes ?? []) {
       console.log(`   ◆ ${th.label} (${th.threadIds.length})  "${th.quote.slice(0, 70)}"${th.quoteVerified ? "" : "  [quote unverified]"}`);
     }
@@ -74,6 +86,7 @@ async function main() {
     console.log(`\ngraph8 tags: tagged=${t.tagged} already=${t.already} failed=${t.failed} created=[${t.tagsCreated.join(", ")}] staleKept=${t.staleKept}`);
   }
   if (run.audience) console.log(`audience: eligible=${run.audience.eligible} excluded=${JSON.stringify(run.audience.excluded)}`);
+  if (run.cards) console.log(`answer cards: generated=${run.cards.generated} failed=${run.cards.failed} verifiedProof=${run.cards.verifiedProof} unverifiedDropped=${run.cards.unverifiedClaims}`);
   if (run.errors.length) console.log(`\nnotes:\n  ${run.errors.join("\n  ")}`);
   console.log(`\nSaved: data/runs/${run.id}.json`);
   process.exit(run.status === "done" ? 0 : 1);

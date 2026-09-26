@@ -69,11 +69,14 @@ export interface ProofItem {
 
 export interface AnswerCard {
   summary: string;
-  quotes: string[];
-  proofWeHave: ProofItem[]; // verified items only
-  proofGap: string | null; // includes claims that failed grounding
+  quotes: string[]; // verbatim from the group's replies
+  proofWeHave: ProofItem[]; // verified items only (excerpt found in the source document)
+  proofGap: string | null; // missing proof, plus any claims that failed grounding
   howToAnswer: string;
   emailAngle: string;
+  themeNotes: { themeId: string; label: string; howToAnswer: string }[]; // one per theme of the group
+  unverifiedClaims: string[]; // claims dropped because their excerpt was not in the document
+  sources: { docId: string; name: string; kind: "global" | "campaign" }[]; // documents the card was given
 }
 
 export type ExclusionReason =
@@ -131,6 +134,8 @@ export interface Run {
   tagging?: { tagged: number; already: number; failed: number; tagsCreated: string[]; staleKept: number };
   /** M3 contact resolution summary. */
   audience?: { eligible: number; excluded: Partial<Record<ExclusionReason, number>> };
+  /** M4 Answer Card summary. */
+  cards?: { generated: number; failed: number; verifiedProof: number; unverifiedClaims: number };
   groups: Group[];
   errors: string[];
 }

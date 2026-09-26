@@ -10,3 +10,20 @@ export const norm = (s: string) =>
     .replace(/[‐‑‒–—−]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
+
+/**
+ * Like norm, but also ignores markdown formatting (**bold**, _italics_, # headings, | tables, > quotes,
+ * list bullets), so a quote copied from rendered markdown still matches the source document.
+ */
+export const normLoose = (s: string) =>
+  norm(
+    s
+      .replace(/[*_#|>~]/g, " ")
+      .replace(/^\s*[-+]\s+/gm, " ")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"), // [text](url) -> text
+  )
+    .replace(/\s+([.,;:!?)])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+export const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;

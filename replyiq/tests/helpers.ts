@@ -34,13 +34,22 @@ export function fakeLlm(
   opts: {
     digest?: (threadText: string) => Digest | Promise<Digest>;
     themes?: (payload: ThemesPayload) => ThemesAnswer | Promise<ThemesAnswer>;
+    card?: (user: string) => CardAnswer | Promise<CardAnswer>;
   } = {},
 ) {
   const requests: LlmRequest<unknown>[] = [];
   const digestRequests: LlmRequest<unknown>[] = [];
   const themeRequests: LlmRequest<unknown>[] = [];
+  const cardRequests: LlmRequest<unknown>[] = [];
   const llm: Llm = {
     async parse<T>(req: LlmRequest<T>) {
+      if (req.name === "answer_card") {
+        cardRequests.push(req as LlmRequest<unknown>);
+        const answer = opts.card
+          ? await opts.card(req.user)
+          : { summary: "s", quotes: [], proof: [], proof_gap: "gap", how_to_answer: "h", email_angle: "e", theme_notes: [] };
+        return { data: req.schema.parse(answer), usage: { inputTokens: 5000, outputTokens: 300 } };
+      }
       if (req.name === "group_themes") {
         themeRequests.push(req as LlmRequest<unknown>);
         const payload = JSON.parse(req.user) as ThemesPayload;
@@ -62,12 +71,21 @@ export function fakeLlm(
       return { data: req.schema.parse({ labels }), usage: { inputTokens: 100, outputTokens: 10 } };
     },
   };
-  return { llm, requests, digestRequests, themeRequests };
+  return { llm, requests, digestRequests, themeRequests, cardRequests };
 }
 
 export type ThemesPayload = {
   group: { name: string; definition: string };
   items: { id: string; company: string | null; reply: string; why_in_this_group: string | null; referred_to: string | null; timing: string | null }[];
+};
+export type CardAnswer = {
+  summary: string;
+  quotes: string[];
+  proof: { claim: string; doc_id: string; excerpt: string }[];
+  proof_gap: string | null;
+  how_to_answer: string;
+  email_angle: string;
+  theme_notes: { theme_id: string; how_to_answer: string }[];
 };
 export type ThemesAnswer = { themes: { label: string; description: string; members: string[]; quote_member: string; quote: string }[] };
 
