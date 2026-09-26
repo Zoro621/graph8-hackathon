@@ -189,6 +189,38 @@ describe("listThreads", () => {
   });
 });
 
+describe("Studio campaign readers", () => {
+  it("reads the full campaign and metrics with the requested window", async () => {
+    let days = "";
+    const { c } = client({
+      "GET /campaigns/c1/full": () =>
+        json({ data: { id: "c1", name: "Ref", status: "paused", linked_sequences: [{ sequence_id: "s1" }], documents: [{ id: "d1", file_type: "messaging_objections", meta_data: { content: "angles" } }] } }),
+      "GET /campaigns/c1/metrics": (u) => {
+        days = u.searchParams.get("days") ?? "";
+        return json({ data: { campaign_id: "c1", metric_status: "unknown", email_metrics: null, send_receipts: { succeeded: 2212 } } });
+      },
+    });
+    const full = await c.getCampaignFull("c1");
+    expect(full.linked_sequences?.[0].sequence_id).toBe("s1");
+    const { docText } = await import("../lib/g8");
+    expect(docText(full.documents?.[0])).toBe("angles");
+    const m = await c.getCampaignMetrics("c1", 365);
+    expect(days).toBe("365");
+    expect(m.metric_status).toBe("unknown");
+  });
+
+  it("the reference config points at the verified SMB chain", async () => {
+    const { REFERENCE } = await import("../lib/config");
+    expect(REFERENCE).toMatchObject({
+      orgId: "org_87325c23062e",
+      studioCampaignId: "6a5f3380-e200-577d-b057-e705ffbc7e7a",
+      sequenceId: "e470a095-5a1a-5a3e-874e-450ef15a9253",
+      audienceListId: 1900262001,
+      mailbox: "campaign-saad@example.com",
+    });
+  });
+});
+
 describe("normalisers", () => {
   it("maps an emails/search item", () => {
     const t = fromSearchItem({

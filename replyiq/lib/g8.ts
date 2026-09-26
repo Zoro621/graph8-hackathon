@@ -109,6 +109,48 @@ export interface SuppressionStatus {
 
 export type Mailbox = Record<string, unknown> & { id?: number; connection_status?: string; is_archived?: boolean };
 
+export interface CampaignDocument {
+  id: string;
+  file_type?: string;
+  display_name?: string;
+  name?: string;
+  status?: string;
+  version?: number;
+  content?: string;
+  meta_data?: { content?: string };
+}
+
+export interface CampaignFull {
+  id: string;
+  name: string;
+  status: string | null;
+  goal?: string | null;
+  target_persona?: string | null;
+  brief?: string | null;
+  core_concept?: string | null;
+  primary_hook?: string | null;
+  channels?: string[];
+  audience_list_id?: string | null;
+  audience?: { list_id?: string; name?: string; item_count?: number } | null;
+  documents?: CampaignDocument[];
+  sequence?: { steps?: { step_id: string; day: number; condition?: string | null; stop_on_reply?: boolean }[] } | null;
+  step_catalog?: { steps?: Record<string, Record<string, unknown>> } | null;
+  linked_sequences?: { sequence_id: string; status?: string }[];
+  is_launched?: boolean;
+}
+
+export interface CampaignMetrics {
+  campaign_id: string;
+  metric_status: "available" | "zero" | "stale" | "unknown" | "missing" | string;
+  email_metrics: Record<string, number> | null;
+  send_receipts?: { dispatched?: number; succeeded?: number; last_dispatched_at?: string } | null;
+  is_running?: boolean;
+  sequence_count?: number;
+}
+
+/** Document text from a campaign document (content may sit top-level or in meta_data). */
+export const docText = (d: CampaignDocument | undefined) => d?.content ?? d?.meta_data?.content ?? "";
+
 interface Envelope<T> {
   data: T;
   pagination?: Pagination | null;
@@ -316,6 +358,20 @@ export function createG8Client(opts: G8ClientOptions) {
     async listGlobalDocs(): Promise<StudioDoc[]> {
       const data = await get<Record<string, unknown>[]>("/global-context/documents", { include_content: true });
       return (data ?? []).map(toStudioDoc);
+    },
+
+    // ---------- Studio campaigns ----------
+    /** Campaign + audience + ALL documents with content + sequence + step catalog + linked_sequences. */
+    getCampaignFull: (id: string) => get<CampaignFull>(`/campaigns/${encodeURIComponent(id)}/full`),
+    getCampaignMetrics: (id: string, days = 30) =>
+      get<CampaignMetrics>(`/campaigns/${encodeURIComponent(id)}/metrics`, { days }),
+
+    // ---------- sequences: extras ----------
+    async getSequenceChannels(id: string): Promise<{ channel_type?: string; channel_value?: string; channel_id?: number }[]> {
+      const data = await get<{ items?: Record<string, unknown>[] } | Record<string, unknown>[]>(
+        `/sequences/${encodeURIComponent(id)}/channels`,
+      );
+      return (Array.isArray(data) ? data : (data?.items ?? [])) as { channel_type?: string; channel_value?: string }[];
     },
 
     // ---------- mailboxes ----------

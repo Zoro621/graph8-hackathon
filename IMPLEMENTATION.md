@@ -247,13 +247,21 @@ Behaviour, matching what the docs say the SDK does:
 - Any suppressed contact is also excluded, whatever its category.
 - A group gets a draft campaign only if it's a follow-up category and has at least `MIN_GROUP_SIZE` eligible contacts.
 
-**Expected groups on today's seeded data** (sequence `90bda420`, 10 threads):
+**Expected groups on the reference campaign** (graph8 Tech SMB Sales, sequence `e470a095`, 19 replies; see REPLYIQ-PLAN §0b):
+- out of office: ~8 (keep the return date in `revisitHint`)
+- referral / wrong person: ~5–6 (keep the named person in `referredName`)
+- left the company, no referral: 1–2 (`other`, no follow-up)
+- hard no: 1
+- meeting booked: 1 (never followed up)
+- auto-reply / invalid address: 2 (`other`)
+
+**Test set for the objection categories** (synthetic `[DEMO]` sequence `90bda420`, committed in `tests/fixtures/demo/`):
 - interested/meeting: 4
 - pricing request: 2
 - hard no: 2
 - unsubscribe: 2
 
-The pricing group is the main Answer Card demo.
+Classification must use `Reply.conversation`, not just `replyText`. In the SMB meeting thread, the last prospect message reads like a complaint ("the time I picked wasn't 9 am").
 
 ---
 

@@ -6,7 +6,8 @@
 import "./load-env";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { describeError, g8, type Thread, type WritePolicy } from "../lib/g8";
+import { REFERENCE } from "../lib/config";
+import { describeError, docText, g8, type Thread, type WritePolicy } from "../lib/g8";
 import { fetchReplies } from "../lib/pipeline/fetchReplies";
 import { scrub } from "../lib/scrub";
 import type { Reply, StudioDoc } from "../lib/types";
@@ -52,6 +53,49 @@ async function main() {
     const p = await client.writePolicy();
     const how = p.allowed ? `ALLOWED via ${p.via}` : `REFUSED: ${p.reason}`;
     return { value: p, info: `org=${me.org_id} role=${me.role_name ?? me.role ?? "?"}\nwrites: ${how}` };
+  });
+
+  // 1b. Reference campaign chain: Studio campaign -> sequence -> list -> mailbox -> replies
+  await check("1b. Reference campaign chain (graph8 Tech SMB Sales)", true, async () => {
+    const R = REFERENCE;
+    const [camp, seq, channels, threads, metrics] = await Promise.all([
+      client.getCampaignFull(R.studioCampaignId),
+      client.getSequence(R.sequenceId),
+      client.getSequenceChannels(R.sequenceId),
+      client.listThreads(R.sequenceId),
+      client.getCampaignMetrics(R.studioCampaignId, 365).catch(() => null),
+    ]);
+    const docs = camp.documents ?? [];
+    const docLine = (ft: string) => {
+      const d = docs.find((x) => x.file_type === ft);
+      return `${ft.padEnd(22)} ${d ? `${docText(d).length} chars (id ${d.id})` : "MISSING"}`;
+    };
+    const problems = [
+      !(camp.linked_sequences ?? []).some((l) => l.sequence_id === R.sequenceId) && "sequence not linked to the Studio campaign",
+      String(camp.audience_list_id) !== String(R.audienceListId) && `campaign audience ${camp.audience_list_id} != ${R.audienceListId}`,
+      seq.associated_list_id !== R.audienceListId && `sequence list ${seq.associated_list_id} != ${R.audienceListId}`,
+      !channels.some((c) => c.channel_value === R.mailbox) && `mailbox ${R.mailbox} not attached to the sequence`,
+      threads.length === 0 && "no reply threads",
+      ...Object.values(R.docs).filter((ft) => !docText(docs.find((x) => x.file_type === ft))).map((ft) => `doc ${ft} missing`),
+    ].filter(Boolean) as string[];
+    await save(
+      "reference-campaign.json",
+      { campaign: { ...camp, documents: docs.map((d) => ({ id: d.id, file_type: d.file_type, display_name: d.display_name, chars: docText(d).length })) }, metrics },
+    );
+    return {
+      value: null,
+      ok: problems.length === 0,
+      info: [
+        `campaign: ${camp.name} (status=${camp.status}, launched=${camp.is_launched})`,
+        `goal: ${camp.goal ?? "-"}`,
+        `sequence: ${seq.name} (status=${seq.status}) list=${seq.associated_list_id} audience=${camp.audience?.item_count ?? "?"} contacts`,
+        `mailbox: ${channels.map((c) => c.channel_value).join(", ")}   reply threads: ${threads.length}`,
+        `metrics: status=${metrics?.metric_status ?? "?"} sent=${metrics?.send_receipts?.succeeded ?? "?"}`,
+        `docs: ${docs.length}`,
+        ...Object.values(R.docs).map(docLine),
+        ...(problems.length ? [`PROBLEMS: ${problems.join("; ")}`] : []),
+      ].join("\n"),
+    };
   });
 
   // 2. Sequences (+ detail, steps, stats)

@@ -60,6 +60,8 @@ The hackathon key acts on the **sandbox organisation `org_87325c23062e`**, which
 Any other org is refused and nothing is sent. `npm run spike` prints the current policy.
 
 ## Where the real data is
+**Reference campaign:** the graph8 team's Tech SMB Sales campaign. The IDs are in `lib/config.ts` (`REFERENCE`): Studio campaign `6a5f3380…` → sequence `e470a095…` → list `1900262001` (7,531) → mailbox `campaign-saad@example.com`.
+
 | Sequence | Inbox | Replies | What they are |
 |---|---|---|---|
 | `[Full copy] Kill Your Tool Stack — Tech SMB Sales v2` (`e470a095…`) | `campaign-saad@example.com`, workspace "Graph8 Tech SMB Sales — full campaign" | 19 | **The graph8 team's real SMB campaign** (7,111 contacts, 2,136 sent). Out of office, "left the company, contact X", not interested, bounces, and one full conversation ending in a booked meeting. |
