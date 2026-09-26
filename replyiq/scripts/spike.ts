@@ -1,14 +1,15 @@
 // M1 spike: READ-ONLY checks against graph8. Writes nothing to graph8.
 // (POST /inbox/emails/search is a search; it changes nothing.)
-// Usage: npm run spike            (saves live samples to tests/fixtures/live/, gitignored,
+// Usage: npm run spike [-- --campaign <id> | --sequence <id>]   (default: the source with most replies)
+//        npm run spike            (saves live samples to tests/fixtures/live/, gitignored,
 //                                  plus a scrubbed [DEMO]-only sample to tests/fixtures/demo/)
 //        npm run spike -- --no-save
 import "./load-env";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { REFERENCE } from "../lib/config";
 import { describeError, docText, g8, type Thread, type WritePolicy } from "../lib/g8";
 import { fetchReplies } from "../lib/pipeline/fetchReplies";
+import { discoverSources, fetchSourceReplies, pickDefaultSource, resolveSource, type SourceSelector } from "../lib/pipeline/sources";
 import { scrub } from "../lib/scrub";
 import type { Reply, StudioDoc } from "../lib/types";
 
@@ -43,6 +44,16 @@ async function save(file: string, data: unknown, dir = LIVE) {
   await writeFile(path.join(dir, file), JSON.stringify(data, null, 2) + "\n", "utf8");
 }
 
+function argSelector(): SourceSelector | null {
+  const val = (flag: string) => {
+    const i = process.argv.indexOf(flag);
+    return i > -1 ? process.argv[i + 1] : undefined;
+  };
+  const campaignId = val("--campaign");
+  const sequenceId = val("--sequence");
+  return campaignId ? { campaignId } : sequenceId ? { sequenceId } : null;
+}
+
 async function main() {
   const client = g8();
   console.log("ReplyIQ M1 spike: read-only checks against graph8\n");
@@ -55,48 +66,51 @@ async function main() {
     return { value: p, info: `org=${me.org_id} role=${me.role_name ?? me.role ?? "?"}\nwrites: ${how}` };
   });
 
-  // 1b. Reference campaign chain: Studio campaign -> sequence -> list -> mailbox -> replies
-  await check("1b. Reference campaign chain (graph8 Tech SMB Sales)", true, async () => {
-    const R = REFERENCE;
-    const [camp, seq, channels, threads, metrics] = await Promise.all([
-      client.getCampaignFull(R.studioCampaignId),
-      client.getSequence(R.sequenceId),
-      client.getSequenceChannels(R.sequenceId),
-      client.listThreads(R.sequenceId),
-      client.getCampaignMetrics(R.studioCampaignId, 365).catch(() => null),
-    ]);
-    const docs = camp.documents ?? [];
-    const docLine = (ft: string) => {
-      const d = docs.find((x) => x.file_type === ft);
-      return `${ft.padEnd(22)} ${d ? `${docText(d).length} chars (id ${d.id})` : "MISSING"}`;
-    };
-    const problems = [
-      !(camp.linked_sequences ?? []).some((l) => l.sequence_id === R.sequenceId) && "sequence not linked to the Studio campaign",
-      String(camp.audience_list_id) !== String(R.audienceListId) && `campaign audience ${camp.audience_list_id} != ${R.audienceListId}`,
-      seq.associated_list_id !== R.audienceListId && `sequence list ${seq.associated_list_id} != ${R.audienceListId}`,
-      !channels.some((c) => c.channel_value === R.mailbox) && `mailbox ${R.mailbox} not attached to the sequence`,
-      threads.length === 0 && "no reply threads",
-      ...Object.values(R.docs).filter((ft) => !docText(docs.find((x) => x.file_type === ft))).map((ft) => `doc ${ft} missing`),
-    ].filter(Boolean) as string[];
-    await save(
-      "reference-campaign.json",
-      { campaign: { ...camp, documents: docs.map((d) => ({ id: d.id, file_type: d.file_type, display_name: d.display_name, chars: docText(d).length })) }, metrics },
+  // 1b. Discover every campaign/sequence with replies (nothing hardcoded)
+  const sources = await check("1b. Discover sources (sequences + campaigns + reply counts)", true, async () => {
+    const list = await discoverSources(client);
+    const lines = list.map(
+      (s) =>
+        `${String(s.replyThreads).padStart(3)} replies  ${s.sequenceName}${s.campaignName ? `  [campaign: ${s.campaignName}]` : ""}  ${s.mailboxes.join(",")}`,
     );
-    return {
-      value: null,
-      ok: problems.length === 0,
-      info: [
-        `campaign: ${camp.name} (status=${camp.status}, launched=${camp.is_launched})`,
-        `goal: ${camp.goal ?? "-"}`,
-        `sequence: ${seq.name} (status=${seq.status}) list=${seq.associated_list_id} audience=${camp.audience?.item_count ?? "?"} contacts`,
-        `mailbox: ${channels.map((c) => c.channel_value).join(", ")}   reply threads: ${threads.length}`,
-        `metrics: status=${metrics?.metric_status ?? "?"} sent=${metrics?.send_receipts?.succeeded ?? "?"}`,
-        `docs: ${docs.length}`,
-        ...Object.values(R.docs).map(docLine),
-        ...(problems.length ? [`PROBLEMS: ${problems.join("; ")}`] : []),
-      ].join("\n"),
-    };
+    await save("sources.json", list);
+    return { value: list, ok: list.some((s) => s.replyThreads > 0), info: [`${list.length} sequence(s)`, ...lines].join("\n") };
   });
+
+  // 1c. Resolve the chosen source into its chain: --campaign <id> | --sequence <id> | default = most replies
+  const selector = argSelector() ?? pickDefaultSource(sources ?? []);
+  if (selector) {
+    await check(`1c. Resolve source ${JSON.stringify(selector)}`, true, async () => {
+      const ctx = await resolveSource(client, selector);
+      const { threads, replies } = await fetchSourceReplies(client, ctx);
+      const docLines = (["objections", "replyTemplates", "emails", "brief"] as const).map(
+        (k) => `${k.padEnd(15)} ${ctx.docs[k] ? `${ctx.docs[k]!.name} (${ctx.docs[k]!.content.length} chars)` : "not found"}`,
+      );
+      const metrics = ctx.campaign ? await client.getCampaignMetrics(ctx.campaign.id, 365).catch(() => null) : null;
+      await save("source-context.json", {
+        selector,
+        campaign: ctx.campaign ? { id: ctx.campaign.id, name: ctx.campaign.name, goal: ctx.campaign.goal, docs: (ctx.campaign.documents ?? []).map((d) => ({ id: d.id, file_type: d.file_type, display_name: d.display_name, chars: docText(d).length })) } : null,
+        sequences: ctx.sequences.map((q) => ({ id: q.id, name: q.name, status: q.status, list: q.associated_list_id })),
+        audienceListId: ctx.audienceListId,
+        mailboxes: ctx.mailboxes,
+        warnings: ctx.warnings,
+        metrics,
+      });
+      return {
+        value: null,
+        ok: replies.length > 0,
+        info: [
+          `campaign: ${ctx.campaign ? `${ctx.campaign.name} (goal: ${ctx.campaign.goal ?? "-"})` : "(none: standalone sequence)"}`,
+          `sequences: ${ctx.sequences.map((q) => `${q.name} [${q.status}]`).join(" | ") || "-"}`,
+          `audience list: ${ctx.audienceListId ?? "-"}   sender mailboxes: ${ctx.mailboxes.join(", ") || "-"}`,
+          `reply threads: ${threads}, prospect replies: ${replies.length}`,
+          `metrics: ${metrics ? `status=${metrics.metric_status} sent=${metrics.send_receipts?.succeeded ?? "?"}` : "-"}`,
+          ...docLines,
+          ...ctx.warnings.map((w) => `warning: ${w}`),
+        ].join("\n"),
+      };
+    });
+  }
 
   // 2. Sequences (+ detail, steps, stats)
   const sequences = await check("2. Sequences", true, async () => {

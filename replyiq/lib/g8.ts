@@ -120,6 +120,15 @@ export interface CampaignDocument {
   meta_data?: { content?: string };
 }
 
+export interface CampaignListItem {
+  id: string;
+  name: string;
+  status: string | null;
+  goal?: string | null;
+  target_persona?: string | null;
+  created_at?: string | null;
+}
+
 export interface CampaignFull {
   id: string;
   name: string;
@@ -286,24 +295,25 @@ export function createG8Client(opts: G8ClientOptions) {
      * Searched ONE mailbox at a time: observed 26 Sep that passing several mailboxes in one call
      * drops results (the [DEMO] threads came back 0 with two mailboxes, 10 with one).
      */
-    async searchEmailThreads(mailboxes: string[], campaignIds: string[]): Promise<Thread[]> {
-      const out: Thread[] = [];
+    async searchEmailThreads(mailboxes: string[], campaignIds: string[] = []): Promise<Thread[]> {
+      // The same thread can show up under more than one mailbox, so dedupe by id.
+      const byId = new Map<string, Thread>();
       for (const mailbox of mailboxes) {
         let seen = 0;
         for (let page = 1; page <= MAX_PAGES; page++) {
           const res = await call<Envelope<{ items?: Record<string, unknown>[]; total?: number }>>("/inbox/emails/search", {
             method: "POST",
             query: { page, page_size: SEARCH_PAGE_SIZE },
-            body: { mailboxes: [mailbox], campaign_ids: campaignIds },
+            body: { mailboxes: [mailbox], ...(campaignIds.length ? { campaign_ids: campaignIds } : {}) },
             maxRetries: opts.maxRetries ?? 2,
           });
           const items = res.data?.items ?? [];
-          out.push(...items.map(fromSearchItem));
+          for (const t of items.map(fromSearchItem)) if (!byId.has(t.id)) byId.set(t.id, t);
           seen += items.length;
           if (items.length === 0 || seen >= (res.data?.total ?? seen)) break;
         }
       }
-      return out;
+      return [...byId.values()];
     },
 
     /** GET /inbox filtered by sequence, following pagination. */
@@ -361,6 +371,15 @@ export function createG8Client(opts: G8ClientOptions) {
     },
 
     // ---------- Studio campaigns ----------
+    async listCampaigns(): Promise<CampaignListItem[]> {
+      const out: CampaignListItem[] = [];
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const { data, pagination } = await getPage<CampaignListItem>("/campaigns", { page, limit: 100 });
+        out.push(...data);
+        if (!pagination?.has_next || data.length === 0) break;
+      }
+      return out;
+    },
     /** Campaign + audience + ALL documents with content + sequence + step catalog + linked_sequences. */
     getCampaignFull: (id: string) => get<CampaignFull>(`/campaigns/${encodeURIComponent(id)}/full`),
     getCampaignMetrics: (id: string, days = 30) =>

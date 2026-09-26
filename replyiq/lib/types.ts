@@ -90,6 +90,21 @@ export interface Run {
   errors: string[];
 }
 
+/**
+ * Something ReplyIQ can analyse: one sequence, plus the Studio campaign it belongs to (if any).
+ * Discovered at runtime from the org (lib/pipeline/sources.ts); nothing is hardcoded.
+ */
+export interface SourceSummary {
+  sequenceId: string;
+  sequenceName: string;
+  sequenceStatus: string | null;
+  contactCount: number | null;
+  campaignId: string | null; // Studio campaign linking this sequence
+  campaignName: string | null;
+  replyThreads: number; // threads with at least one prospect message
+  mailboxes: string[]; // inbox mailboxes the replies were found in
+}
+
 /** A Studio Global Context document, as returned by GET /global-context/documents. */
 export interface StudioDoc {
   id: string;

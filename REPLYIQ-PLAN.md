@@ -33,8 +33,10 @@ This plan is built only from the stored docs and OpenAPI spec (`scratchpad/opena
 | **Studio → Campaign** | 5 AI **ideas** about graph8 itself; none converted or launched. | The seeded sequences aren't linked to any Studio campaign, so `/campaigns/{id}/full` → `linked_sequences` finds nothing. The follow-up is still created as a new Studio campaign. |
 | **Studio → Global** | 34/43 generated. Context 21/21 **Done**, including **Proof Catalog, Pricing Matrix, Value Props, Messaging House**, Offer Brief, Positioning Matrix. Research 0/6 and Targeting 0/3 not started. A "enter your domain" onboarding popup appears (left untouched). | The Answer Card inputs exist, so no generation is needed. The docs describe graph8's own offer, not MapleMetrics/OrbitDesk. Treat the org as selling graph8 and say so. |
 
-## 0b. Reference campaign (the team's choice, 26 Sep): graph8 Tech SMB Sales
-ReplyIQ is built, tested and demoed on the graph8 team's **real** "Kill Your Tool Stack — Tech SMB Sales" campaign. It's a CIENCE reactivation campaign that offers graph8's three data products on a no-cost tier. The IDs live in `replyiq/lib/config.ts` (`REFERENCE`), and `npm run spike` check 1b verifies the whole chain live.
+## 0b. Demo campaign (found at runtime, not hardcoded): graph8 Tech SMB Sales
+ReplyIQ is **not tied to any campaign**. At runtime it discovers every sequence in the org (`lib/pipeline/sources.ts`), counts the replies for each from the inbox, links each sequence to its Studio campaign, and works on whichever you pick. If you don't pick, it uses the one with the most replies. Campaign documents are found by Studio `file_type` or by name, never by ID.
+
+For the demo, the team is using the graph8 team's **real** "Kill Your Tool Stack — Tech SMB Sales" campaign (a CIENCE reactivation offering graph8's three data products on a no-cost tier). It's also what discovery picks by default today, because it has the most replies. The IDs below are just what discovery found on 26 Sep; nothing in the code depends on them.
 
 | Piece | ID / value |
 |---|---|

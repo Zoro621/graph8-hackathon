@@ -208,17 +208,6 @@ describe("Studio campaign readers", () => {
     expect(days).toBe("365");
     expect(m.metric_status).toBe("unknown");
   });
-
-  it("the reference config points at the verified SMB chain", async () => {
-    const { REFERENCE } = await import("../lib/config");
-    expect(REFERENCE).toMatchObject({
-      orgId: "org_87325c23062e",
-      studioCampaignId: "6a5f3380-e200-577d-b057-e705ffbc7e7a",
-      sequenceId: "e470a095-5a1a-5a3e-874e-450ef15a9253",
-      audienceListId: 1900262001,
-      mailbox: "campaign-saad@example.com",
-    });
-  });
 });
 
 describe("normalisers", () => {

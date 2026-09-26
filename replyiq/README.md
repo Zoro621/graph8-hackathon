@@ -60,7 +60,9 @@ The hackathon key acts on the **sandbox organisation `org_87325c23062e`**, which
 Any other org is refused and nothing is sent. `npm run spike` prints the current policy.
 
 ## Where the real data is
-**Reference campaign:** the graph8 team's Tech SMB Sales campaign. The IDs are in `lib/config.ts` (`REFERENCE`): Studio campaign `6a5f3380…` → sequence `e470a095…` → list `1900262001` (7,531) → mailbox `campaign-saad@example.com`.
+**Nothing is hardcoded.** `lib/pipeline/sources.ts` discovers every sequence, its reply count and its Studio campaign at runtime, and resolves your choice into campaign → sequences → audience list → mailboxes → campaign docs. The default is the source with the most replies. Pick one explicitly with `npm run spike -- --campaign <id>` or `--sequence <id>`.
+
+What discovery finds today (26 Sep); the demo uses the first row:
 
 | Sequence | Inbox | Replies | What they are |
 |---|---|---|---|

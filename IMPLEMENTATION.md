@@ -20,6 +20,11 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
   - `[Full copy] Kill Your Tool Stack v2`: 19 anonymised real replies (mostly OOO, "left the company, contact X", "not interested")
   - `[Hackathon copy] … v2`: 9 placeholders ("Original private reply omitted")
 - **The real data is the graph8 team's SMB campaign** (`[Full copy] Kill Your Tool Stack — Tech SMB Sales v2`, mailbox `campaign-saad@example.com`, workspace "Graph8 Tech SMB Sales — full campaign"): 7,111 contacts, 2,136 sent, 19 replies. One reply is an 8-message thread that ends in a **booked meeting**, so each `Reply` now carries `conversation` (the last 8 messages) and graph8's `summary`, and `Category` gained `meeting_booked`. No graph8 Workflows exist yet (`GET /workflows` returns 0).
+- **Sources are discovered, never hardcoded** (`lib/pipeline/sources.ts`):
+  - `discoverSources()` makes one inbox pass per mailbox and counts replies for every sequence, linking each to its Studio campaign.
+  - `resolveSource({campaignId} | {sequenceId})` returns the campaign, its sequences, audience list, sender mailboxes and campaign docs (matched by `file_type`, then by name).
+  - `pickDefaultSource()` chooses the source with the most replies.
+  - The spike takes `--campaign <id>` or `--sequence <id>`.
 - **Other checks:**
   - 14 inbox tags already exist (Interested, Not Interested, Out of Office, Referred Colleague, Time Objection…)
   - 17/17 contacts resolved, none suppressed
@@ -247,7 +252,7 @@ Behaviour, matching what the docs say the SDK does:
 - Any suppressed contact is also excluded, whatever its category.
 - A group gets a draft campaign only if it's a follow-up category and has at least `MIN_GROUP_SIZE` eligible contacts.
 
-**Expected groups on the reference campaign** (graph8 Tech SMB Sales, sequence `e470a095`, 19 replies; see REPLYIQ-PLAN §0b):
+**Expected groups on the demo campaign** (graph8 Tech SMB Sales, picked at runtime; 19 replies today; see REPLYIQ-PLAN §0b):
 - out of office: ~8 (keep the return date in `revisitHint`)
 - referral / wrong person: ~5–6 (keep the named person in `referredName`)
 - left the company, no referral: 1–2 (`other`, no follow-up)
