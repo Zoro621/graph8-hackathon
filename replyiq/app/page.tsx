@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 const milestones = [
   ["M0", "Scaffold", true],
-  ["M1", "graph8 client + spike", false],
+  ["M1", "graph8 client + spike", true],
   ["M2", "Fetch + classify replies", false],
   ["M3", "Tag threads + contact guards", false],
   ["M4", "Answer Cards (grounded)", false],

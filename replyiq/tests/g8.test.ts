@@ -1,0 +1,197 @@
+import { G8Error } from "@graph8/sdk";
+import { describe, expect, it, vi } from "vitest";
+import { createG8Client, describeError, fromSearchItem, normaliseTagList, toStudioDoc, WriteNotAllowedError } from "../lib/g8";
+
+type Route = (url: URL, init: RequestInit) => Response | Promise<Response>;
+
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+
+/** A fake fetch: first matching "METHOD /path" wins; records every call. */
+function fakeFetch(routes: Record<string, Route>) {
+  const calls: { method: string; path: string; url: URL; body?: unknown }[] = [];
+  const impl = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = new URL(String(input));
+    const method = (init.method ?? "GET").toUpperCase();
+    const path = url.pathname.replace(/^\/api\/v1/, "");
+    calls.push({ method, path, url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+    const route = routes[`${method} ${path}`];
+    if (!route) return json({ detail: `no route for ${method} ${path}` }, 404);
+    return route(url, init);
+  });
+  return { impl: impl as unknown as typeof fetch, calls };
+}
+
+const client = (routes: Record<string, Route>, extra: Partial<Parameters<typeof createG8Client>[0]> = {}) => {
+  const f = fakeFetch(routes);
+  const sleeps: number[] = [];
+  const c = createG8Client({
+    base: "https://be.graph8.test/api/v1",
+    apiKey: "test-key",
+    fetchImpl: f.impl,
+    sleepImpl: async (ms) => void sleeps.push(ms),
+    ...extra,
+  });
+  return { c, calls: f.calls, sleeps };
+};
+
+describe("HTTP core", () => {
+  it("unwraps {data} and sends the bearer key", async () => {
+    let auth = "";
+    const { c } = client({
+      "GET /sequences/s1": (_u, init) => {
+        auth = new Headers(init.headers).get("authorization") ?? "";
+        return json({ data: { id: "s1", name: "Seq" } });
+      },
+    });
+    expect((await c.getSequence("s1")).name).toBe("Seq");
+    expect(auth).toBe("Bearer test-key");
+  });
+
+  it("retries a 429 honouring Retry-After, then succeeds", async () => {
+    let n = 0;
+    const { c, sleeps } = client({
+      "GET /sequences/s1": () => (++n === 1 ? json({ detail: "slow down" }, 429, { "retry-after": "2" }) : json({ data: { id: "s1" } })),
+    });
+    await c.getSequence("s1");
+    expect(n).toBe(2);
+    expect(sleeps).toEqual([2000]);
+  });
+
+  it("does not retry a 4xx and surfaces a readable error", async () => {
+    let n = 0;
+    const { c } = client({
+      "GET /sequences/bad": () => {
+        n++;
+        return json({ detail: "Sequence not found" }, 404, { "x-request-id": "req_1" });
+      },
+    });
+    const err = await c.getSequence("bad").catch((e) => e);
+    expect(n).toBe(1);
+    expect(err).toBeInstanceOf(G8Error);
+    expect(describeError(err)).toMatch(/404.*Sequence not found.*req_1/);
+  });
+
+  it("gives up after 2 retries on repeated 5xx", async () => {
+    let n = 0;
+    const { c } = client({ "GET /sequences/s1": () => (n++, json({ detail: "boom" }, 503)) });
+    await expect(c.getSequence("s1")).rejects.toBeInstanceOf(G8Error);
+    expect(n).toBe(3);
+  });
+
+  it("follows pagination on list endpoints", async () => {
+    const { c, calls } = client({
+      "GET /sequences": (u) =>
+        u.searchParams.get("page") === "1"
+          ? json({ data: [{ id: "a" }], pagination: { has_next: true } })
+          : json({ data: [{ id: "b" }], pagination: { has_next: false } }),
+    });
+    expect((await c.listSequences()).map((s) => s.id)).toEqual(["a", "b"]);
+    expect(calls.filter((x) => x.path === "/sequences")).toHaveLength(2);
+  });
+});
+
+describe("write policy (fails closed)", () => {
+  const notSandbox = () => json({ detail: "This endpoint is available only in the graph8 developer sandbox environment." }, 404);
+  const me = (org = "org_live") => () => json({ data: { org_id: org, role: "admin" } });
+
+  it("allows writes when /sandbox/status says sandbox", async () => {
+    const { c } = client({ "GET /sandbox/status": () => json({ data: { sandbox: true, environment: "sandbox", org_id: "org_sb" } }) });
+    await expect(c.assertWriteAllowed()).resolves.toMatchObject({ allowed: true, via: "sandbox", orgId: "org_sb" });
+  });
+
+  it("refuses writes off-sandbox when G8_WRITE_ORG_ID is not set", async () => {
+    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me() });
+    await expect(c.assertWriteAllowed()).rejects.toBeInstanceOf(WriteNotAllowedError);
+  });
+
+  it("refuses writes when G8_WRITE_ORG_ID is a different org", async () => {
+    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me("org_other") }, { writeOrgId: "org_live" });
+    await expect(c.assertWriteAllowed()).rejects.toThrow(/does not match/);
+  });
+
+  it("allows writes only when G8_WRITE_ORG_ID matches the key's org", async () => {
+    const { c } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me("org_live") }, { writeOrgId: "org_live" });
+    await expect(c.assertWriteAllowed()).resolves.toMatchObject({ allowed: true, via: "org_allowlist" });
+  });
+
+  it("a refused write never reaches the network", async () => {
+    const { c, calls } = client({ "GET /sandbox/status": notSandbox, "GET /roles/me/permissions": me() });
+    await expect(c.write("POST", "/inbox/tags", { name: "x" })).rejects.toBeInstanceOf(WriteNotAllowedError);
+    expect(calls.some((x) => x.method === "POST")).toBe(false);
+  });
+
+  it("does not treat other sandbox errors as 'not sandbox'", async () => {
+    const { c } = client({ "GET /sandbox/status": () => json({ detail: "forbidden" }, 403) });
+    await expect(c.writePolicy()).rejects.toBeInstanceOf(G8Error);
+  });
+});
+
+describe("listThreads", () => {
+  const searchItem = (id: string, mailbox: string, seq: string) => ({
+    id,
+    mailbox,
+    subject: `Re: ${id}`,
+    campaign_id: seq,
+    campaign_name: "Seq",
+    contact: { id: 42, email: "P@Example.com", first_name: "Pat", last_name: "Lee", company_name: "Acme" },
+    messages: { messages: [{ responder: "OTHER", content: "hi", from_email: ["p@example.com"], to: [], date: "2026-09-24T10:00:00Z", draft: false }] },
+    tags: [{ id: "t1", name: "Interested" }],
+  });
+
+  it("searches one mailbox per call and merges with GET /inbox, deduped", async () => {
+    const { c, calls } = client({
+      "GET /inbox/mailboxes/all": () => json({ data: { items: [{ email: "a@example.com" }, { email: "b@example.com" }] } }),
+      "POST /inbox/emails/search": (_u, init) => {
+        const body = JSON.parse(String(init.body));
+        const mb = body.mailboxes[0];
+        const items = mb === "a@example.com" ? [searchItem("t-1", mb, "seq1"), searchItem("t-2", mb, "seq1")] : [];
+        return json({ data: { items, total: items.length } });
+      },
+      "GET /inbox": () => json({ data: [{ id: "t-2", messages: [] }, { id: "t-3", messages: [] }], pagination: { has_next: false } }),
+    });
+    const threads = await c.listThreads("seq1");
+    expect(threads.map((t) => t.id).sort()).toEqual(["t-1", "t-2", "t-3"]);
+    const searches = calls.filter((x) => x.path === "/inbox/emails/search");
+    expect(searches.map((x) => (x.body as { mailboxes: string[] }).mailboxes)).toEqual([["a@example.com"], ["b@example.com"]]);
+    expect(threads.find((t) => t.id === "t-2")?.source).toBe("emails.search"); // search result wins
+  });
+
+  it("drops threads that belong to a different sequence", async () => {
+    const { c } = client({
+      "GET /inbox/mailboxes/all": () => json({ data: { items: [{ email: "a@example.com" }] } }),
+      "POST /inbox/emails/search": () => json({ data: { items: [searchItem("t-9", "a@example.com", "other")], total: 1 } }),
+      "GET /inbox": () => json({ data: [], pagination: { has_next: false } }),
+    });
+    expect(await c.listThreads("seq1")).toEqual([]);
+  });
+});
+
+describe("normalisers", () => {
+  it("maps an emails/search item", () => {
+    const t = fromSearchItem({
+      id: "x",
+      campaign_id: "s",
+      contact: { id: "7", email: "A@Example.com", first_name: "A", last_name: "B", company_name: "Co" },
+      messages: { messages: [{ responder: "USER", content: "", html_content: "<p>hi</p>", from_email: ["me@example.com"], draft: false }] },
+      tags: [{ id: 1, name: "T" }, { name: "no id" }],
+    });
+    expect(t.contact).toEqual({ id: 7, email: "a@example.com", name: "A B", company: "Co" });
+    expect(t.messages[0]).toMatchObject({ content: "<p>hi</p>", from: "me@example.com", responder: "USER" });
+    expect(t.tags).toEqual([{ id: "1", name: "T" }]);
+  });
+
+  it("accepts the tag list as array or wrapped", () => {
+    expect(normaliseTagList([{ id: "1", name: "A" }])).toHaveLength(1);
+    expect(normaliseTagList({ tags: [{ tag_id: "2", tag_name: "B" }] })[0]).toMatchObject({ id: "2", name: "B" });
+    expect(normaliseTagList({ nothing: true })).toEqual([]);
+  });
+
+  it("reads Studio doc content from meta_data when top-level content is missing", () => {
+    expect(toStudioDoc({ id: 1, display_name: "Proof Catalog", meta_data: { content: "proof" } })).toMatchObject({
+      id: "1",
+      displayName: "Proof Catalog",
+      content: "proof",
+    });
+  });
+});

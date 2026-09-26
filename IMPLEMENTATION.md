@@ -8,6 +8,25 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M1 results (26 Sep, verified live)
+- **The graph8 client is built on the SDK's `request()`.** It accepts `{method, body, headers, query, idempotencyKey, maxRetries}`; retries 429/5xx/network, honouring `Retry-After`; and adds an `Idempotency-Key` on writes. Checked in the installed SDK source.
+- **There's no sandbox environment for this key.** `/sandbox/status` returns **404** ("only in the developer sandbox environment"). The key acts on production, org `org_87325c23062e` (role admin), which holds the seeded hackathon data. **Writes fail closed**: they're allowed only if sandbox status is true, or if `G8_WRITE_ORG_ID` matches the key's org (from `GET /roles/me/permissions`). It's unset until graph8 confirms.
+- **How replies are read:** `GET /inbox?sequence_id=` misses the seeded `[DEMO]` threads. **`POST /inbox/emails/search`** (a search that changes nothing) returns them, with the thread id, **contact id**, `campaign_id` (= sequence id), tags and summary. Mailboxes come from `GET /inbox/mailboxes/all`.
+  - **It must be called one mailbox at a time.** Passing two mailboxes returned 0 of the 10 demo threads.
+  - The client uses both readers and merges them by thread id.
+- **Data found:** 6 sequences (4 not shown in the Sequencer UI), 40 replies across 4 sequences, all with contact ids:
+  - `[DEMO] Product introduction history`: 10
+  - `[DEMO] Follow-up outcome history`: 2
+  - `[Full copy] Kill Your Tool Stack v2`: 19 anonymised real replies (mostly OOO, "left the company, contact X", "not interested")
+  - `[Hackathon copy] … v2`: 9 placeholders ("Original private reply omitted")
+- **Other checks:**
+  - 14 inbox tags already exist (Interested, Not Interested, Out of Office, Referred Colleague, Time Objection…)
+  - 17/17 contacts resolved, none suppressed
+  - all 6 key Studio docs are present (Proof Catalog 20k chars, Pricing Matrix 26k…)
+  - 2 mailboxes, 0 active
+- **Privacy:** the live samples contain real phone numbers and the owner's email, so they're kept in the gitignored `tests/fixtures/live/`. Only the scrubbed `[DEMO]` sample in `tests/fixtures/demo/` is committed.
+- **Tests:** 27 unit tests covering retries, 4xx/5xx handling, pagination, the write policy (including "a refused write never hits the network"), per-mailbox search and merge, normalisers, text cleanup, scrubbing and the real demo threads. `npm run spike` passes 20/20.
+
 ## 1. Scope of the first build
 
 **In scope:**
