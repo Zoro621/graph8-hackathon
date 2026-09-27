@@ -1,6 +1,6 @@
 "use client";
 import { AnimatePresence, LayoutGroup, m } from "motion/react";
-import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, RotateCcw, ShieldAlert, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Loader2, RotateCcw, ShieldAlert, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -97,6 +97,10 @@ export default function RunView({ runId }: { runId: string }) {
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 pb-24 pt-8 sm:px-6">
+      <Link href="/" className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-text">
+        <ArrowLeft className="size-4" /> All sequences
+      </Link>
+
       {/* header */}
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
