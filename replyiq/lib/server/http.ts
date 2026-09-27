@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import type { ApiErrorBody } from "../api-types";
 import { toApiError } from "./service";
+import { assertSameOrigin } from "./origin";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -13,8 +14,9 @@ export function fail(err: unknown) {
   return NextResponse.json<ApiErrorBody>({ error: { code: e.code, message: e.message } }, { status: e.status, headers: NO_STORE });
 }
 
-/** Parses a JSON body; an empty body is `{}`. */
+/** Checks the caller (see assertSameOrigin), then parses the JSON body; an empty body is `{}`. */
 export async function body(req: Request): Promise<unknown> {
+  assertSameOrigin(req);
   const text = await req.text();
   if (!text.trim()) return {};
   try {
