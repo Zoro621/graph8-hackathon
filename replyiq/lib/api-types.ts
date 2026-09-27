@@ -16,7 +16,32 @@ export interface Draftability {
   reason?: string;
 }
 
-export type GroupView = Omit<Group, "replies"> & { replies: ReplyView[]; draftable: Draftability };
+/** An earlier run's draft of the same group for the same campaign, which this run can take over instead of creating a new one. */
+export interface PreviousDraft {
+  runId: string;
+  campaignId: string;
+  campaignName?: string;
+  status: "drafting" | "ready" | "failed";
+  updatedAt: string;
+  audience: number;
+}
+
+export type GroupView = Omit<Group, "replies"> & { replies: ReplyView[]; draftable: Draftability; previousDraft?: PreviousDraft };
+
+/** One step of a sequence as the V1 -> V2 view shows it. */
+export interface StepView {
+  order: number;
+  day: number; // days after the previous step
+  kind: "ai" | "template"; // written per contact by graph8's AI at send time, or a fixed template
+  subject?: string;
+  text: string; // the template body, or the instructions graph8's AI follows
+}
+
+/** The original sequence(s) of a run, read live from graph8 (read-only). */
+export interface OriginalView {
+  sequences: { id: string; name: string; steps: StepView[] }[];
+  errors: string[];
+}
 
 /** Why a run saved with another graph8 key is read-only (shown by the server and the UI). */
 export const OTHER_ORG_REASON = "This run was made in a different graph8 org than the one your API key opens";

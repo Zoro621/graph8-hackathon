@@ -16,7 +16,7 @@ describe("LIVE drafts in graph8 (read-only)", () => {
   it("every ready draft exists in Studio with its list, audience and ReplyIQ sections", async (ctx) => {
     const store = createFileStore();
     const runs = (await Promise.all((await store.list()).map((r) => store.load(r.id)))).filter(Boolean);
-    const drafts = runs.flatMap((run) => run!.groups.filter((g) => g.draft?.status === "ready" && g.draft.campaignId).map((g) => ({ run: run!, g })));
+    const drafts = runs.flatMap((run) => run!.groups.filter((g) => g.draft?.status === "ready" && g.draft.campaignId && !g.draft.supersededBy).map((g) => ({ run: run!, g })));
     if (drafts.length === 0) return ctx.skip();
 
     for (const { run, g } of drafts) {

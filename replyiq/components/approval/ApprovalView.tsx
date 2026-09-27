@@ -1,21 +1,24 @@
 "use client";
 import { AnimatePresence, m } from "motion/react";
-import { AlertTriangle, ArrowLeft, CalendarClock, CheckCircle2, Coins, ExternalLink, Loader2, RefreshCcw, Rocket, Sparkles, Users, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, Coins, ExternalLink, History, Loader2, PenLine, RefreshCcw, Rocket, Sparkles, Users, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import AnswerCardView from "../run/AnswerCardView";
 import FollowupEmails from "./FollowupEmails";
 import AudienceTable from "./AudienceTable";
+import ChannelPlan from "./ChannelPlan";
+import V1V2Diff from "./V1V2Diff";
 import DraftProgress from "./DraftProgress";
 import ConfirmDraftModal, { DRAFT_CREDITS } from "./ConfirmDraftModal";
 import StateNotice from "../shell/StateNotice";
-import { Button, Chip, Counter, Eyebrow, SpotCard } from "../ui/primitives";
+import { Button, Chip, Counter, Eyebrow, HoldButton, SpotCard } from "../ui/primitives";
 import { api, keys, revalidate, useRunView, useStatus } from "@/lib/client/api";
 import { meta } from "@/lib/ui/categories";
-import { displayName } from "@/lib/ui/format";
+import { displayName, timeAgo } from "@/lib/ui/format";
+import { useNow } from "@/lib/client/hooks";
 import type { Category } from "@/lib/types";
 
-type Tab = "card" | "emails" | "audience";
+type Tab = "card" | "emails" | "plan" | "v1v2" | "audience";
 
 const studioUrl = (campaignId: string) => `https://app.graph8.com/studio?campaignId=${encodeURIComponent(campaignId)}`;
 
@@ -28,6 +31,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const [confirm, setConfirm] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const now = useNow(true, 60_000);
 
   if (!run) {
     if (error?.code === "not_configured") return <StateNotice kind="setup" />;
@@ -62,11 +66,15 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const current: Tab = tab ?? (draft?.sequence ? "emails" : group.card ? "card" : "audience");
   const writeBlocked = status?.write && !status.write.allowed ? status.write.reason : null;
 
-  const act = async (action: "create" | "patch" | "previews", label: string) => {
+  // A newer run took this draft over: read-only here. An earlier run's draft of this group can be taken over instead of a new one.
+  const takenOver = draft?.supersededBy;
+  const previous = draft?.campaignId ? undefined : group.previousDraft;
+
+  const act = async (action: "create" | "patch" | "previews" | "rewrite" | "adopt", label: string) => {
     setPending(label);
     setActionError(null);
     try {
-      await api.draft(run.id, groupKey, { action, ...(action === "previews" ? { previews: 2 } : {}) });
+      await api.draft(run.id, groupKey, { action, ...(action === "previews" ? { previews: 2 } : {}), ...(action === "adopt" && previous ? { fromRunId: previous.runId } : {}) });
       await revalidate(keys.run(run.id));
     } catch (e) {
       setActionError((e as Error).message);
@@ -78,6 +86,8 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const tabs: { k: Tab; label: string; show: boolean }[] = [
     { k: "card", label: "Answer Card", show: Boolean(group.card) },
     { k: "emails", label: "Follow-up emails", show: true },
+    { k: "plan", label: "Channel plan", show: Boolean(draft?.strategy) },
+    { k: "v1v2", label: "V1 → V2", show: Boolean(draft?.sequence) },
     { k: "audience", label: `Audience · ${audienceSize}`, show: true },
   ];
 
@@ -142,6 +152,8 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
           <m.div key={current} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }} className="surface rounded-3xl p-5 sm:p-8">
             {current === "card" && group.card && <AnswerCardView card={group.card} color={color} themes={group.themes} />}
             {current === "emails" && <FollowupEmails group={group} sequence={draft?.sequence} />}
+            {current === "plan" && draft?.strategy && <ChannelPlan strategy={draft.strategy} color={color} />}
+            {current === "v1v2" && draft && <V1V2Diff runId={run.id} draft={draft} channels={run.channels} color={color} />}
             {current === "audience" && <AudienceTable group={group} runExcluded={runExcluded} />}
           </m.div>
         </div>
@@ -196,11 +208,32 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
             <AnimatePresence mode="wait" initial={false}>
               {!draft ? (
                 <m.div key="idle" exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-3">
+                  {previous && (
+                    <div className="flex flex-col gap-3 rounded-xl border border-iris/30 bg-iris/[0.05] p-3.5">
+                      <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
+                        <History className="mt-0.5 size-3.5 shrink-0 text-iris" />
+                        <span>
+                          An <Link href={`/runs/${previous.runId}/groups/${groupKey}`} className="text-iris hover:underline">earlier run</Link> already drafted this follow-up
+                          {previous.campaignName ? ` (“${previous.campaignName}”)` : ""}, {timeAgo(Date.parse(previous.updatedAt), now)}. Update it with this run&apos;s evidence: the same list, campaign and
+                          sequence, with the Answer Card and emails replaced. No new Studio documents, so no ~{DRAFT_CREDITS} credits.
+                        </span>
+                      </p>
+                      {pending === "adopt" ? (
+                        <span className="flex items-center gap-2 text-sm text-lime">
+                          <Loader2 className="size-4 animate-spin" /> Taking it over…
+                        </span>
+                      ) : (
+                        <HoldButton onConfirm={() => void act("adopt", "adopt")} disabled={!draftable || busyElsewhere || Boolean(writeBlocked) || Boolean(pending)} className="w-full">
+                          Hold to update the existing draft
+                        </HoldButton>
+                      )}
+                    </div>
+                  )}
                   <p className="text-sm leading-relaxed text-muted">
-                    Creates the audience list, a Studio campaign carrying this Answer Card, and fact-checked follow-up emails. You approve before anything is created.
+                    {previous ? "Or create a separate new draft: " : ""}Creates the audience list, a Studio campaign carrying this Answer Card, and fact-checked follow-up emails. You approve before anything is created.
                   </p>
-                  <Button variant="iris" magnetic disabled={!draftable || busyElsewhere || Boolean(writeBlocked) || Boolean(pending)} onClick={() => setConfirm(true)} className="w-full">
-                    {pending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Draft follow-up in graph8
+                  <Button variant={previous ? "ghost" : "iris"} magnetic disabled={!draftable || busyElsewhere || Boolean(writeBlocked) || Boolean(pending)} onClick={() => setConfirm(true)} className="w-full">
+                    {pending === "create" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {previous ? "Create a new draft instead" : "Draft follow-up in graph8"}
                   </Button>
                   {!draftable && group.draftable.reason && <p className="text-xs text-amber">{group.draftable.reason}.</p>}
                   {writeBlocked && <p className="text-xs text-amber">{writeBlocked}</p>}
@@ -208,6 +241,22 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                 </m.div>
               ) : (
                 <m.div key="progress" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4">
+                  {takenOver && (
+                    <Link
+                      href={`/runs/${takenOver}/groups/${groupKey}`}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-amber/30 bg-amber/[0.06] p-3 text-xs leading-relaxed text-amber transition-colors hover:bg-amber/10"
+                    >
+                      A newer run took this draft over: the campaign now carries its evidence. This copy is read-only. <span className="flex shrink-0 items-center gap-1 font-medium">Continue there <ArrowRight className="size-3.5" /></span>
+                    </Link>
+                  )}
+                  {draft.adoptedFrom && !takenOver && (
+                    <p className="flex items-start gap-2 text-xs leading-relaxed text-dim">
+                      <History className="mt-0.5 size-3.5 shrink-0" />
+                      <span>
+                        Took over the draft of an <Link href={`/runs/${draft.adoptedFrom}/groups/${groupKey}`} className="text-iris hover:underline">earlier run</Link>: same list, campaign and sequence, updated with this run&apos;s evidence.
+                      </span>
+                    </p>
+                  )}
                   <DraftProgress draft={draft} working={drafting || jobHere} />
                   {draft.status === "failed" && draft.error && <p className="rounded-xl border border-rose/25 bg-rose/[0.05] p-3 text-xs leading-relaxed text-rose">{draft.error}</p>}
                   {draft.warnings.length > 0 && draft.status !== "drafting" && (
@@ -225,7 +274,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                       Open the campaign in Studio <ExternalLink className="size-4 text-iris" />
                     </a>
                   )}
-                  {!drafting && !jobHere && (
+                  {!drafting && !jobHere && !takenOver && (
                     <div className="flex flex-wrap gap-2">
                       {(draft.status === "failed" || (run.interrupted && draft.status === "drafting")) && (
                         <Button variant="ghost" onClick={() => setConfirm(true)} disabled={busyElsewhere || Boolean(pending)} className="!px-3.5 !py-2 text-xs">
@@ -235,6 +284,17 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                       {draft.status === "ready" && draft.docsPending.length > 0 && (
                         <Button variant="ghost" onClick={() => act("patch", "patch")} disabled={busyElsewhere || Boolean(pending)} className="!px-3.5 !py-2 text-xs">
                           {pending === "patch" ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />} Add the card to {draft.docsPending.length} late doc{draft.docsPending.length === 1 ? "" : "s"}
+                        </Button>
+                      )}
+                      {draft.status === "ready" && draft.sequence?.status === "ready" && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => act("rewrite", "rewrite")}
+                          disabled={busyElsewhere || Boolean(pending)}
+                          className="!px-3.5 !py-2 text-xs"
+                          title="Writes the follow-up emails and the channel plan again, fact-checked, in the same Sequencer draft. No new sequence; nothing is sent."
+                        >
+                          {pending === "rewrite" ? <Loader2 className="size-3.5 animate-spin" /> : <PenLine className="size-3.5" />} Rewrite the follow-up emails
                         </Button>
                       )}
                       {draft.status === "ready" && draft.sequence?.status === "ready" && !referral && (
