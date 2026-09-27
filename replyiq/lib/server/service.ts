@@ -7,12 +7,12 @@ import { describeError, WriteNotAllowedError } from "../g8";
 import type { Llm } from "../llm";
 import type { RunStore } from "../store";
 import { CATEGORY_KEYS, allowsFollowUpCampaign, categoryInfo } from "../taxonomy";
-import type { CampaignDraft, Category, Run, SourceSummary, StudioLearnings } from "../types";
+import type { CampaignDraft, Category, Group, Run, SourceSummary, StudioLearnings } from "../types";
 import { emptyRun, runPipeline } from "../pipeline/runPipeline";
 import { discoverSources } from "../pipeline/sources";
-import { DraftError, draftCampaign } from "../pipeline/draftCampaign";
+import { DraftError, draftCampaign, nameKey, parsePersonNames } from "../pipeline/draftCampaign";
 import { LearningsError, applyLearnings, proposeLearnings, removeLearnings } from "../pipeline/studioLearnings";
-import type { GroupView, LearningsView, RunSummary, RunView, StatusView } from "../api-types";
+import type { Draftability, GroupView, LearningsView, RunSummary, RunView, StatusView } from "../api-types";
 import { activeJob, claim, release } from "./jobs";
 
 export interface ServiceDeps {
@@ -139,19 +139,38 @@ const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefin
     }),
   };
 
+/**
+ * Same rules as draftCampaign: a follow-up category, a resolved audience, and at least `min` targets.
+ * Referrals target the people named in the replies (looked up in the CRM at draft time), not the sender.
+ * The draft looks each name up within that reply's company, so a name counts once per company. This is an
+ * upper bound: the draft still enforces the minimum on the contacts it actually finds.
+ */
+export function draftability(run: Pick<Run, "steps">, g: Group, min: number): Draftability {
+  const referral = g.key === "referral_wrong_person";
+  const targets = referral
+    ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size
+    : g.eligible.length;
+  if (!allowsFollowUpCampaign(g.key)) return { ok: false, targets, reason: `${g.label} never gets a follow-up campaign` };
+  if (run.steps.resolve !== "done") return { ok: false, targets, reason: "The audience has not been checked yet" };
+  if (targets < min)
+    return { ok: false, targets, reason: referral ? `Needs at least ${min} named people to look up; the replies name ${targets}` : `Needs at least ${min} eligible contacts; this group has ${targets}` };
+  return { ok: true, targets };
+}
+
 /** The run as the UI needs it: no full conversations, no document backups, plus live job state. */
-export function toRunView(run: Run): RunView {
+export function toRunView(run: Run, minGroup = 2): RunView {
   const job = activeJob(run.id);
   const groups: GroupView[] = run.groups.map((g) => ({
     ...g,
     replies: g.replies.map(({ conversation, ...r }) => ({ ...r, messages: conversation.length })),
+    draftable: draftability(run, g, minGroup),
   }));
   const working = run.status === "running" || run.groups.some((g) => g.draft?.status === "drafting");
   return { ...run, groups, learnings: stripLearnings(run.learnings), job, interrupted: working && !job };
 }
 
 export async function getRunView(deps: ServiceDeps, id: string): Promise<RunView> {
-  return toRunView(await loadRun(deps, id));
+  return toRunView(await loadRun(deps, id), deps.env.MIN_GROUP_SIZE);
 }
 
 export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<RunSummary[]> {
@@ -166,7 +185,7 @@ export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<R
       name: r.source.name,
       replies: r.counts.prospectReplies,
       groups: r.groups.map((g) => ({ key: g.key, count: g.replies.length })),
-      draftable: r.groups.filter((g) => allowsFollowUpCampaign(g.key) && (g.key === "referral_wrong_person" ? g.replies.some((x) => x.referredName) : g.eligible.length >= deps.env.MIN_GROUP_SIZE)).length,
+      draftable: r.groups.filter((g) => draftability(r, g, deps.env.MIN_GROUP_SIZE).ok).length,
       drafts: r.groups.filter((g) => g.draft?.status === "ready").length,
       job: activeJob(r.id),
     }));
@@ -192,6 +211,11 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
   if (!allowsFollowUpCampaign(groupKey)) throw new ApiError(409, "not_possible", `"${group.label}" never gets a follow-up campaign (${categoryInfo(groupKey).followUp})`);
   if (run.steps.resolve !== "done") throw new ApiError(409, "not_possible", "The run's audience was not resolved; run the analysis again first");
   if (input.action !== "create" && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
+  // Same preflight the UI shows, so a direct request can't start a draft that is bound to fail.
+  if (input.action === "create") {
+    const d = draftability(run, group, deps.env.MIN_GROUP_SIZE);
+    if (!d.ok) throw new ApiError(409, "not_possible", d.reason ?? "This group can't be drafted");
+  }
   await deps.g8.assertWriteAllowed();
   if (!claim(runId, "draft", groupKey)) throw new ApiError(409, "busy", "Another job is already working on this run");
 

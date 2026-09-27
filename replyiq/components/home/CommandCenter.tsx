@@ -13,6 +13,7 @@ import { Button, Counter, Eyebrow, Kbd, SpotCard } from "../ui/primitives";
 import { openPalette } from "../shell/CommandPalette";
 import { api, keys, revalidate, useRunSummaries, useRunView, useSources, useStatus } from "@/lib/client/api";
 import { ALL_CATEGORIES, meta } from "@/lib/ui/categories";
+import { connectionState } from "@/lib/ui/connection";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 const REASONS = ALL_CATEGORIES.length;
@@ -28,8 +29,9 @@ const TAXONOMY_ITEMS: TickerItem[] = ALL_CATEGORIES.map((key) => ({
 
 export default function CommandCenter() {
   const router = useRouter();
-  const { data: status } = useStatus();
+  const { data: status, error: statusError } = useStatus();
   const configured = status?.configured === true;
+  const { state: statusState, message: statusMessage } = connectionState(status, statusError);
   const sources = useSources(configured);
   const { data: runs } = useRunSummaries(configured);
   const latestDone = runs?.find((r) => r.status === "done" && r.replies > 0);
@@ -106,7 +108,8 @@ export default function CommandCenter() {
     }
   };
 
-  const sourceList = [...(sources.data ?? [])].sort((a, b) => b.replyThreads - a.replyThreads);
+  const sourceList = (sources.data ?? []).filter((src) => src.replyThreads > 0).sort((a, b) => b.replyThreads - a.replyThreads);
+  const repliesWaiting = sources.data ? sourceList.reduce((n, src) => n + src.replyThreads, 0) : null;
 
   return (
     <div className="relative">
@@ -207,14 +210,14 @@ export default function CommandCenter() {
             transition={{ delay: 1.1 }}
           >
             {[
-              { v: 3, l: "labels graph8 gives replies today" },
+              { v: repliesWaiting, l: "prospect replies across your sequences" },
               { v: REASONS, l: "reasons ReplyIQ separates" },
-              { v: 0, l: "emails sent without your approval" },
+              { v: 0, l: "emails ReplyIQ ever sends" },
             ].map((s) => (
               <div key={s.l}>
                 <dt className="sr-only">{s.l}</dt>
                 <dd className="text-4xl font-semibold tracking-tight text-text">
-                  <Counter value={s.v} />
+                  {s.v == null ? <span className="text-dim">–</span> : <Counter value={s.v} />}
                 </dd>
                 <p className="mx-auto mt-1 max-w-40 text-xs leading-snug text-dim">{s.l}</p>
               </div>
@@ -289,8 +292,16 @@ export default function CommandCenter() {
             </Button>
           )}
         </div>
-        {!configured ? (
+        {statusState === "setup" ? (
           <StateNotice kind="setup" compact />
+        ) : statusState === "error" ? (
+          <StateNotice kind="error" compact title={statusError ? "Couldn't reach the ReplyIQ server" : "Couldn't reach graph8"} detail={statusMessage} />
+        ) : statusState === "loading" ? (
+          <div className="grid gap-5 lg:grid-cols-2">
+            {[0, 1].map((i) => (
+              <div key={i} className="surface h-72 animate-pulse rounded-2xl opacity-50" />
+            ))}
+          </div>
         ) : sources.error && !sources.data ? (
           <StateNotice kind="error" compact title="Couldn't read your graph8 org" detail={sources.error.message} />
         ) : !sources.data ? (
@@ -301,7 +312,7 @@ export default function CommandCenter() {
             <p className="text-sm text-dim lg:col-span-2">Discovering sequences and counting replies in your graph8 org…</p>
           </div>
         ) : sourceList.length === 0 ? (
-          <StateNotice kind="not-found" compact title="No sequences in this org yet" detail="Once a sequence has replies in the graph8 Inbox, it shows up here." />
+          <StateNotice kind="not-found" compact title="No sequences with replies yet" detail="Once a sequence has replies in the graph8 Inbox, it shows up here." />
         ) : (
           <div className="grid gap-5 lg:grid-cols-2">
             {sourceList.map((src, i) => (

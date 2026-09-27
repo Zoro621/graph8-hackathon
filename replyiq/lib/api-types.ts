@@ -9,7 +9,14 @@ export type { SourceSummary };
 /** A reply as the UI sees it: the full conversation stays on the server (it can be long and personal). */
 export type ReplyView = Omit<Classified, "conversation"> & { messages: number };
 
-export type GroupView = Omit<Group, "replies"> & { replies: ReplyView[] };
+/** Whether a follow-up can be drafted, decided by the server with the same rules the draft applies. */
+export interface Draftability {
+  ok: boolean;
+  targets: number; // eligible contacts, or for referrals the distinct people named
+  reason?: string;
+}
+
+export type GroupView = Omit<Group, "replies"> & { replies: ReplyView[]; draftable: Draftability };
 
 /** Learnings without the local document backups (those never leave the server). */
 export type LearningsView = Omit<StudioLearnings, "proposals"> & {

@@ -42,7 +42,9 @@ export function parsePersonNames(referred: string | undefined): string[] {
     .filter((s) => !s.includes("@") && !ROLE_WORDS.test(s) && /^[A-Z][A-Za-z'’.-]+(?:\s+[A-Z][A-Za-z'’.-]+){1,3}$/.test(s));
 }
 
-const sameName = (a: string, b: string) => a.toLowerCase().replace(/\s+/g, " ").trim() === b.toLowerCase().replace(/\s+/g, " ").trim();
+/** How two person names are compared (case and spacing ignored). Also used by the API preflight. */
+export const nameKey = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
 
 type DraftClient = SequenceClient &
   Pick<

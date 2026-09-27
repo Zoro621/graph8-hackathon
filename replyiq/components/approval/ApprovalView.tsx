@@ -11,7 +11,7 @@ import ConfirmDraftModal, { DRAFT_CREDITS } from "./ConfirmDraftModal";
 import StateNotice from "../shell/StateNotice";
 import { Button, Chip, Counter, Eyebrow, SpotCard } from "../ui/primitives";
 import { api, keys, revalidate, useRunView, useStatus } from "@/lib/client/api";
-import { canDraftGroup, meta } from "@/lib/ui/categories";
+import { meta } from "@/lib/ui/categories";
 import { displayName } from "@/lib/ui/format";
 import type { Category } from "@/lib/types";
 
@@ -51,9 +51,12 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const drafting = draft?.status === "drafting" && !run.interrupted;
   const jobHere = run.job?.kind === "draft" && run.job.group === groupKey;
   const busyElsewhere = Boolean(run.job) && !jobHere;
-  const minGroup = status?.minGroupSize ?? 2;
-  const draftable = run.steps.resolve === "done" && canDraftGroup(group, minGroup);
+  const draftable = group.draftable.ok;
   const referral = groupKey === "referral_wrong_person";
+  // The number and its label switch together: the draft's list once it has one; otherwise (no draft yet, or one that
+  // stopped short of a list) the server's preflight count, labelled as what it is.
+  const onList = draft?.audience.length ?? 0;
+  const [audienceLabel, audienceSize] = onList > 0 ? ["On the list", onList] : [referral ? "Named people" : "Eligible", group.draftable.targets];
   const runExcluded = run.groups.reduce((n, g) => n + g.excluded.length, 0);
   const revisit = [...new Set(group.replies.map((r) => r.revisitHint).filter(Boolean))] as string[];
   const current: Tab = tab ?? (draft?.sequence ? "emails" : group.card ? "card" : "audience");
@@ -75,7 +78,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const tabs: { k: Tab; label: string; show: boolean }[] = [
     { k: "card", label: "Answer Card", show: Boolean(group.card) },
     { k: "emails", label: "Follow-up emails", show: true },
-    { k: "audience", label: `Audience · ${draft?.audience.length || (referral ? group.replies.length : group.eligible.length)}`, show: true },
+    { k: "audience", label: `Audience · ${audienceSize}`, show: true },
   ];
 
   const flow = [
@@ -149,10 +152,10 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="flex items-center gap-1.5 text-xs text-muted">
-                  <Users className="size-3.5" /> {referral ? "Named people" : "Eligible"}
+                  <Users className="size-3.5" /> {audienceLabel}
                 </p>
                 <p className="mt-1 text-3xl font-semibold tabular-nums">
-                  <Counter value={draft?.audience.length || (referral ? group.replies.filter((r) => r.referredName).length : group.eligible.length)} />
+                  <Counter value={audienceSize} />
                 </p>
                 <button onClick={() => setTab("audience")} className="text-[11px] text-rose/90 hover:underline">
                   {group.excluded.length} excluded here →
@@ -199,7 +202,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                   <Button variant="iris" magnetic disabled={!draftable || busyElsewhere || Boolean(writeBlocked) || Boolean(pending)} onClick={() => setConfirm(true)} className="w-full">
                     {pending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Draft follow-up in graph8
                   </Button>
-                  {!draftable && <p className="text-xs text-amber">This group needs at least {minGroup} eligible contacts.</p>}
+                  {!draftable && group.draftable.reason && <p className="text-xs text-amber">{group.draftable.reason}.</p>}
                   {writeBlocked && <p className="text-xs text-amber">{writeBlocked}</p>}
                   {busyElsewhere && <p className="text-xs text-amber">Another job is running on this run. Try again when it finishes.</p>}
                 </m.div>

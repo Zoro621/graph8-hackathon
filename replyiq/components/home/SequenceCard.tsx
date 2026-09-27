@@ -1,7 +1,7 @@
 "use client";
 import { ArrowRight, Inbox, Layers, Loader2, MessageSquareText, Users, Workflow } from "lucide-react";
 import type { RunSummary, SourceSummary } from "@/lib/api-types";
-import { displayName, timeAgo } from "@/lib/ui/format";
+import { displayName, splitName, timeAgo } from "@/lib/ui/format";
 import { Button, Chip, Counter, SpotCard } from "../ui/primitives";
 
 const ease = [0.16, 1, 0.3, 1] as const;
@@ -26,6 +26,7 @@ export default function SequenceCard({
   onLaunch: () => void;
 }) {
   const hasReplies = source.replyThreads > 0;
+  const name = splitName(source.sequenceName);
   return (
     <SpotCard
       tilt
@@ -43,7 +44,16 @@ export default function SequenceCard({
       </div>
 
       <div>
-        <h3 className="text-2xl font-semibold tracking-tight">{displayName(source.sequenceName)}</h3>
+        <h3 className="text-2xl font-semibold tracking-tight">{name.title}</h3>
+        {name.tags.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {name.tags.map((t) => (
+              <Chip key={t} color="#9b8cff">
+                {t}
+              </Chip>
+            ))}
+          </div>
+        )}
         {source.campaignName && (
           <p className="mt-1.5 flex items-center gap-1.5 text-sm text-muted">
             <Layers className="size-3.5 shrink-0" /> <span className="truncate">{displayName(source.campaignName)}</span>
