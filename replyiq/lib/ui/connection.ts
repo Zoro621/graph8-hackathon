@@ -10,7 +10,7 @@ export type ConnectionState = "loading" | "setup" | "error" | "live" | "readonly
 export function connectionState(status: StatusView | undefined, fetchError?: { message: string }): { state: ConnectionState; message?: string } {
   if (fetchError) return { state: "error", message: fetchError.message };
   if (!status) return { state: "loading" };
-  if (!status.configured) return { state: "setup", message: `Add ${status.missing.join(" and ") || "the API keys"} to .env.local` };
+  if (!status.configured) return { state: "setup", message: `Add ${status.missing.join(" and ") || "the API keys"} to .env.local (on Vercel: the project's environment variables)` };
   if (status.error) return { state: "error", message: status.error };
   if (status.write && !status.write.allowed) return { state: "readonly", message: status.write.reason };
   return { state: "live" };

@@ -1,0 +1,5 @@
+# Never upload secrets or local run data (data/ holds real reply text and contact emails).
+.env*
+data/
+.next/
+node_modules/

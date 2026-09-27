@@ -17,6 +17,7 @@ import {
   OTHER_ORG_REASON,
   type Draftability,
   type GroupView,
+  type JobView,
   type LearningsView,
   type OriginalView,
   type PreviousDraft,
@@ -25,7 +26,7 @@ import {
   type StatusView,
   type StepView,
 } from "../api-types";
-import { activeJob, claim, release } from "./jobs";
+import { activeJob, memoryJobs, type JobLock } from "./jobs";
 
 export interface ServiceDeps {
   g8: G8Client;
@@ -38,6 +39,8 @@ export interface ServiceDeps {
     ENABLE_LAUNCH: boolean;
     G8_SEQUENCE_OWNER_EMAIL?: string;
   };
+  /** The one-job-per-run lock: in-process locally (default), in Redis on serverless hosts. */
+  jobs?: JobLock;
   /** Runs work after the response is sent (next/server `after` in routes; awaited in tests). */
   schedule: (task: () => Promise<void>) => void;
   log?: (msg: string) => void;
@@ -98,6 +101,8 @@ export function clearSourcesCache() {
 
 // ---------- runs ----------
 
+const lock = (deps: ServiceDeps) => deps.jobs ?? memoryJobs;
+
 /** The org the API key opens (the client caches it after the first call); undefined when graph8 can't be reached. */
 async function keyOrg(deps: ServiceDeps): Promise<string | undefined> {
   try {
@@ -135,7 +140,7 @@ export async function startRun(deps: ServiceDeps, body: unknown): Promise<{ runI
   const selector = input.campaignId ? { campaignId: input.campaignId } : { sequenceId: input.sequenceId! };
   const runId = deps.store.newRunId();
   await deps.store.save(emptyRun(runId, selector, new Date()));
-  claim(runId, "pipeline");
+  await lock(deps).claim(runId, "pipeline");
   deps.schedule(async () => {
     try {
       await runPipeline(
@@ -154,7 +159,7 @@ export async function startRun(deps: ServiceDeps, body: unknown): Promise<{ runI
       // runPipeline records step failures itself; this only catches a crash (e.g. the run file can't be saved).
       await recordRunFailure(deps, runId, describeError(err)).catch(() => {});
     } finally {
-      release(runId);
+      await lock(deps).release(runId);
     }
   });
   return { runId };
@@ -201,8 +206,7 @@ export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, min: n
 }
 
 /** The run as the UI needs it: no full conversations, no document backups, plus live job state. */
-export function toRunView(run: Run, minGroup = 2, org?: string, previous: Partial<Record<Category, PreviousDraft>> = {}): RunView {
-  const job = activeJob(run.id);
+export function toRunView(run: Run, minGroup = 2, org?: string, previous: Partial<Record<Category, PreviousDraft>> = {}, job: JobView | null = activeJob(run.id)): RunView {
   const groups: GroupView[] = run.groups.map((g) => ({
     ...g,
     replies: g.replies.map(({ conversation, ...r }) => ({ ...r, messages: conversation.length })),
@@ -241,7 +245,7 @@ export async function previousDrafts(deps: ServiceDeps, run: Run): Promise<Parti
 export async function getRunView(deps: ServiceDeps, id: string): Promise<RunView> {
   const run = await loadRun(deps, id);
   const org = await keyOrg(deps);
-  return toRunView(run, deps.env.MIN_GROUP_SIZE, org, fromOtherOrg(run, org) ? {} : await previousDrafts(deps, run));
+  return toRunView(run, deps.env.MIN_GROUP_SIZE, org, fromOtherOrg(run, org) ? {} : await previousDrafts(deps, run), await lock(deps).active(run.id));
 }
 
 /** Recent runs of the org the key opens. Runs saved with another key stay reachable by URL, read-only. */
@@ -253,6 +257,7 @@ export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<R
     if (run && !fromOtherOrg(run, org)) runs.push(run);
     if (runs.length === limit) break;
   }
+  const jobsById = new Map(await Promise.all(runs.map(async (r) => [r.id, await lock(deps).active(r.id)] as const)));
   return runs.map((r) => ({
       id: r.id,
       createdAt: r.createdAt,
@@ -262,7 +267,7 @@ export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<R
       groups: r.groups.map((g) => ({ key: g.key, count: g.replies.length })),
       draftable: r.groups.filter((g) => draftability(r, g, deps.env.MIN_GROUP_SIZE).ok).length,
       drafts: r.groups.filter((g) => g.draft?.status === "ready").length,
-      job: activeJob(r.id),
+      job: jobsById.get(r.id) ?? null,
     }));
 }
 
@@ -306,11 +311,11 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
   }
   const earlier = input.action === "adopt" ? await takeoverSource(deps, run, groupKey, input.fromRunId!) : null;
   await deps.g8.assertWriteAllowed();
-  if (!claim(runId, "draft", groupKey)) throw new ApiError(409, "busy", "Another job is already working on this run");
+  if (!(await lock(deps).claim(runId, "draft", groupKey))) throw new ApiError(409, "busy", "Another job is already working on this run");
   if (earlier) {
     // The earlier run is written too (marked taken over): hold its lock for that write.
-    if (!claim(earlier.run.id, "draft", groupKey)) {
-      release(runId);
+    if (!(await lock(deps).claim(earlier.run.id, "draft", groupKey))) {
+      await lock(deps).release(runId);
       throw new ApiError(409, "busy", "A job is working on the earlier run; try again when it finishes");
     }
     try {
@@ -322,10 +327,10 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
       earlier.run.updatedAt = at;
       await deps.store.save(earlier.run);
     } catch (err) {
-      release(runId);
+      await lock(deps).release(runId);
       throw err;
     } finally {
-      release(earlier.run.id);
+      await lock(deps).release(earlier.run.id);
     }
   }
 
@@ -357,7 +362,7 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
       // draftCampaign records its own failures; this only catches errors thrown before it saved anything.
       await recordDraftFailure(deps, runId, groupKey, describeError(err)).catch(() => {});
     } finally {
-      release(runId);
+      await lock(deps).release(runId);
     }
   });
   return { runId, group: groupKey };
@@ -416,7 +421,7 @@ async function takeoverSource(deps: ServiceDeps, run: Run, key: Category, fromRu
   const draft = group?.draft;
   if (!group || !draft?.campaignId || !draft.listId) throw new ApiError(409, "not_possible", "The earlier run has no draft of this group to take over");
   if (draft.supersededBy) throw new ApiError(409, "taken_over", `That draft was already taken over by run ${draft.supersededBy}`);
-  if (activeJob(earlier.id)) throw new ApiError(409, "busy", "A job is working on the earlier run; try again when it finishes");
+  if (await lock(deps).active(earlier.id)) throw new ApiError(409, "busy", "A job is working on the earlier run; try again when it finishes");
   return { run: earlier, group, draft };
 }
 
@@ -436,7 +441,7 @@ async function recordDraftFailure(deps: ServiceDeps, runId: string, key: Categor
 /** Saving a run's block replaced any older run's block for the same campaign: their records now say so. */
 async function markReplaced(deps: ServiceDeps, newer: Run, keys: string[]) {
   for (const { id } of await deps.store.list()) {
-    if (id === newer.id || activeJob(id)) continue; // a run with a job is rewritten by that job
+    if (id === newer.id || (await lock(deps).active(id))) continue; // a run with a job is rewritten by that job
     const run = await deps.store.load(id).catch(() => null);
     const l = run?.learnings;
     if (!run || run.orgId !== newer.orgId || l?.status !== "applied" || !l.proposals.some((p) => keys.includes(p.key))) continue;
@@ -459,13 +464,13 @@ export async function runLearnings(deps: ServiceDeps, runId: string, body: unkno
   if (action !== "propose" && run.learnings?.status === "replaced")
     throw new ApiError(409, "not_possible", "A newer run saved its own block for this campaign in Studio; take it out from that run, or propose this run's text again");
   if (action !== "propose") await deps.g8.assertWriteAllowed();
-  if (!claim(runId, "learnings")) throw new ApiError(409, "busy", "Another job is already working on this run");
+  if (!(await lock(deps).claim(runId, "learnings"))) throw new ApiError(409, "busy", "Another job is already working on this run");
   try {
     const ldeps = { g8: deps.g8, store: deps.store, log: deps.log };
     const result = action === "propose" ? await proposeLearnings(ldeps, runId) : action === "apply" ? await applyLearnings(ldeps, runId) : await removeLearnings(ldeps, runId);
     if (action === "apply" && result.status === "applied") await markReplaced(deps, run, result.proposals.map((p) => p.key));
     return stripLearnings(result)!;
   } finally {
-    release(runId);
+    await lock(deps).release(runId);
   }
 }

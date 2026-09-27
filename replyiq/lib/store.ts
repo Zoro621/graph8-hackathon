@@ -3,6 +3,7 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { customAlphabet } from "nanoid";
+import type { RedisClient } from "./redis";
 import type { Run } from "./types";
 
 const newId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 12);
@@ -77,6 +78,41 @@ export function createFileStore(dir = path.join(process.cwd(), "data", "runs")):
         .filter((r): r is Run => r !== null)
         .map(({ id, createdAt, status, counts }) => ({ id, createdAt, status, counts }))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+  };
+  return store;
+}
+
+/**
+ * Runs in Redis (Upstash): one key per run plus a sorted index by creation time. For serverless hosts, where
+ * there is no disk to keep run files on and each request may reach a different instance.
+ */
+export function createRedisStore(redis: RedisClient, prefix = "replyiq"): RunStore {
+  const key = (id: string) => {
+    if (!ID_RE.test(id)) throw new Error(`Invalid run id: ${id}`);
+    return `${prefix}:run:${id}`;
+  };
+  const index = `${prefix}:runs`;
+  const store: RunStore = {
+    newRunId: () => newId(),
+    async save(run) {
+      await redis.pipeline([
+        ["SET", key(run.id), JSON.stringify(run)],
+        ["ZADD", index, Date.parse(run.createdAt) || Date.now(), run.id],
+      ]);
+    },
+    async load(id) {
+      const raw = await redis.cmd<string | null>("GET", key(id));
+      return raw ? (JSON.parse(raw) as Run) : null;
+    },
+    async list() {
+      const ids = (await redis.cmd<string[]>("ZRANGE", index, 0, -1, "REV")) ?? [];
+      if (!ids.length) return [];
+      const raws = await redis.cmd<(string | null)[]>("MGET", ...ids.map(key));
+      return raws
+        .map((raw) => (raw ? (JSON.parse(raw) as Run) : null))
+        .filter((r): r is Run => r !== null)
+        .map(({ id, createdAt, status, counts }) => ({ id, createdAt, status, counts }));
     },
   };
   return store;
