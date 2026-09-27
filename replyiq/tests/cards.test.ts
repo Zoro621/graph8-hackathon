@@ -71,15 +71,29 @@ describe("validateCard (grounding)", () => {
     );
     expect(card.proofWeHave).toEqual([]);
     expect(card.unverifiedClaims).toEqual(["Customers save 40%"]);
-    expect(card.proofGap).toMatch(/No case study.*Unverified \(not found in the documents\): Customers save 40%/);
-    expect(warnings.join()).toMatch(/excerpt not found/);
+    expect(card.proofGap).toMatch(/No case study.*Could not verify \(no verbatim excerpt in any document\): Customers save 40%/);
+    expect(warnings.join()).toMatch(/not verbatim in any document/);
   });
 
-  it("rejects a real excerpt attributed to the wrong document, or an unknown doc id", () => {
-    const wrongDoc = validateCard(PRICE, answer({ proof: [{ claim: "c", doc_id: "d-proof", excerpt: "graph8 charges for work performed, not for seat access." }] }), DOCS, sent);
-    expect(wrongDoc.card.proofWeHave).toEqual([]);
-    const unknown = validateCard(PRICE, answer({ proof: [{ claim: "c", doc_id: "nope", excerpt: "graph8 charges for work performed, not for seat access." }] }), DOCS, sent);
-    expect(unknown.warnings.join()).toMatch(/unknown doc id/);
+  it("re-grounds a real excerpt attributed to the wrong document, or an unknown doc id, onto the document that holds it", () => {
+    const real = "graph8 charges for work performed, not for seat access.";
+    const wrongDoc = validateCard(PRICE, answer({ proof: [{ claim: "c", doc_id: "d-proof", excerpt: real }] }), DOCS, sent);
+    expect(wrongDoc.card.proofWeHave).toMatchObject([{ claim: "c", sourceDocId: "d-price", sourceDocName: "Pricing Matrix", excerpt: real, verified: true }]);
+    expect(wrongDoc.card.unverifiedClaims).toEqual([]);
+    expect(wrongDoc.warnings.join()).toMatch(/re-grounded: cited Proof Catalog, found in Pricing Matrix/);
+    const unknown = validateCard(PRICE, answer({ proof: [{ claim: "c", doc_id: "nope", excerpt: real }] }), DOCS, sent);
+    expect(unknown.card.proofWeHave).toHaveLength(1);
+    expect(unknown.warnings.join()).toMatch(/cited unknown doc/);
+  });
+
+  it("re-grounds a padded excerpt on its longest verbatim clause, and still drops one with no verbatim clause", () => {
+    const padded = "As the pricing page puts it, graph8 charges for work performed, not for seat access. (verified 2026)";
+    const ok = validateCard(PRICE, answer({ proof: [{ claim: "pay for work", doc_id: "d-price", excerpt: padded }] }), DOCS, sent);
+    expect(ok.card.proofWeHave).toMatchObject([{ sourceDocId: "d-price", excerpt: "graph8 charges for work performed, not for seat access.", verified: true }]);
+    expect(ok.warnings.join()).toMatch(/shorter verbatim excerpt/);
+    const bad = validateCard(PRICE, answer({ proof: [{ claim: "cheaper", doc_id: "d-price", excerpt: "graph8 is forty percent cheaper than every seat-based tool on the market today." }] }), DOCS, sent);
+    expect(bad.card.proofWeHave).toEqual([]);
+    expect(bad.card.unverifiedClaims).toEqual(["cheaper"]);
   });
 
   it("rejects too-short excerpts and dedupes repeated ones", () => {

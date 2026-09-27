@@ -60,6 +60,24 @@ export function buildQuery(group: Group): string {
 const renderPassages = (ps: Passage[]) =>
   ps.map((p) => `<doc id="${p.docId}" name="${p.docName.replace(/"/g, "'")}" kind="${p.kind}">\n${p.text}\n</doc>`).join("\n");
 
+/**
+ * A verbatim home for an excerpt the model mis-cited or padded: the whole excerpt in any document, else its
+ * longest clause (split on sentence and clause punctuation) of at least MIN_EXCERPT_WORDS words in any document.
+ */
+export function reground(excerpt: string, docs: SourceDoc[], loose: (d: SourceDoc) => string): { doc: SourceDoc; excerpt: string } | null {
+  const words = excerpt.split(/\s+/).filter(Boolean);
+  // Longest window of the excerpt's own words first, down to the minimum; the first hit wins.
+  for (let len = words.length; len >= MIN_EXCERPT_WORDS; len--) {
+    for (let start = 0; start + len <= words.length; start++) {
+      const candidate = words.slice(start, start + len).join(" ");
+      const key = normLoose(candidate);
+      const doc = docs.find((d) => loose(d).includes(key));
+      if (doc) return { doc, excerpt: candidate };
+    }
+  }
+  return null;
+}
+
 /** Turn the model's card into a grounded AnswerCard. */
 export function validateCard(group: Group, raw: RawCard, docs: SourceDoc[], sent: Passage[]): { card: AnswerCard; warnings: string[] } {
   const warnings: string[] = [];
@@ -91,15 +109,23 @@ export function validateCard(group: Group, raw: RawCard, docs: SourceDoc[], sent
     seen.add(key);
     if (doc && wordCount(excerpt) >= MIN_EXCERPT_WORDS && loose(doc).includes(key)) {
       proofWeHave.push({ claim: p.claim.trim(), sourceDocId: doc.id, sourceDocName: doc.name, excerpt, verified: true });
-    } else {
-      unverifiedClaims.push(p.claim.trim());
-      warnings.push(`unverified proof dropped (${doc ? "excerpt not found in the document" : `unknown doc id ${p.doc_id.slice(0, 12)}`}): ${p.claim.slice(0, 60)}`);
+      continue;
     }
+    // Re-ground before giving up: the model often cites the wrong document, or pads a real sentence with a
+    // few words of its own. A proof point survives only with an excerpt that IS verbatim in a real document.
+    const regrounded = reground(excerpt, docs, loose);
+    if (regrounded) {
+      proofWeHave.push({ claim: p.claim.trim(), sourceDocId: regrounded.doc.id, sourceDocName: regrounded.doc.name, excerpt: regrounded.excerpt, verified: true });
+      warnings.push(`proof re-grounded: cited ${doc?.name ?? `unknown doc ${p.doc_id.slice(0, 12)}`}, found in ${regrounded.doc.name}${regrounded.excerpt !== excerpt ? " (shorter verbatim excerpt)" : ""}: ${p.claim.slice(0, 60)}`);
+      continue;
+    }
+    unverifiedClaims.push(p.claim.trim());
+    warnings.push(`unverified proof dropped (${doc ? "excerpt not verbatim in any document" : `unknown doc id ${p.doc_id.slice(0, 12)}`}): ${p.claim.slice(0, 60)}`);
   }
 
   let proofGap = raw.proof_gap?.trim() || null;
   if (unverifiedClaims.length) {
-    const note = `Unverified (not found in the documents): ${unverifiedClaims.join("; ")}`;
+    const note = `Could not verify (no verbatim excerpt in any document): ${unverifiedClaims.join("; ")}`;
     proofGap = proofGap ? `${proofGap} ${note}` : note;
   }
   if (proofWeHave.length === 0 && !proofGap) proofGap = "No supporting proof was found in the company's documents for this objection.";
