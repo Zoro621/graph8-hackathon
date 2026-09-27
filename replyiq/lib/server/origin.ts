@@ -10,7 +10,9 @@ export function assertSameOrigin(req: Request) {
   if (!type.toLowerCase().startsWith("application/json")) throw new ApiError(415, "json_required", "Actions must be sent as application/json");
   const origin = req.headers.get("origin");
   if (!origin) return; // same-origin fetches from older browsers, curl, tests
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  // x-forwarded-host is only trusted where the platform overwrites it (Vercel); anywhere else a caller could pick it.
+  const forwarded = process.env.VERCEL ? req.headers.get("x-forwarded-host")?.split(",")[0].trim() : undefined;
+  const host = forwarded || req.headers.get("host");
   let originHost: string | null = null;
   try {
     originHost = new URL(origin).host;
