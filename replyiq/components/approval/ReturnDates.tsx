@@ -52,10 +52,6 @@ export default function ReturnDates({ group, sequence, color }: { group: GroupVi
   const unsplit = sequence?.status === "ready" && !drafted; // drafted before the return-date split existed
   return (
     <div className="flex flex-col gap-6">
-      <p className="max-w-[68ch] text-sm leading-relaxed text-muted">
-        graph8 has no &ldquo;start on a date&rdquo; setting, but step 1 of a sequence can wait a number of days after launch. So each return date gets its own Sequencer draft: people already back
-        get their first email when it&apos;s launched, and everyone else on the first working day after they&apos;re back.
-      </p>
       {unsplit && (
         <p className="rounded-xl border border-amber/25 bg-amber/[0.05] p-3 text-xs leading-relaxed text-amber">
           This draft was made before ReplyIQ split drafts by return date, so its one sequence would email everyone on launch. Press &ldquo;Recount the waiting days&rdquo; to split it as shown below.
