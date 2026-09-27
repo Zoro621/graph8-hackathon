@@ -36,7 +36,7 @@ function ConnectionPill() {
     setup: { color: "#ff5d7a", label: "Not connected", title: message ?? "" },
     error: {
       color: "#ff5d7a",
-      label: !s ? "Server unreachable" : /\b401\b/.test(message ?? "") ? "graph8 key rejected" : "graph8 unreachable",
+      label: error ? "Server unreachable" : /\b401\b/.test(message ?? "") ? "graph8 key rejected" : "graph8 unreachable",
       title: message ?? "",
     },
     live: { color: "#4fe3d1", label: "graph8 · connected", title: `Writes allowed (${s?.write?.allowed ? s.write.via.replace("_", " ") : ""})${s?.credits != null ? ` · ${Math.round(s.credits).toLocaleString()} credits` : ""}` },
