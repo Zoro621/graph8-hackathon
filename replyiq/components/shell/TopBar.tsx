@@ -61,7 +61,7 @@ export default function TopBar() {
             <LogoMark />
           </m.span>
           <span className="text-[15px] font-semibold tracking-tight">
-            Reply<span className="text-iris">IQ</span>
+            Reply<span className="bg-gradient-to-r from-iris via-[#b9a9ff] to-aqua bg-clip-text text-transparent">IQ</span>
           </span>
           <span className="hidden rounded-md border border-line px-1.5 py-0.5 font-mono text-[10px] text-dim sm:inline">for graph8</span>
         </Link>
