@@ -10,7 +10,7 @@ import { CATEGORY_KEYS, allowsFollowUpCampaign, categoryInfo } from "../taxonomy
 import type { CampaignDraft, Category, Group, Run, SourceSummary, StudioLearnings } from "../types";
 import { emptyRun, runPipeline } from "../pipeline/runPipeline";
 import { discoverSources } from "../pipeline/sources";
-import { DraftError, draftCampaign, parsePersonNames } from "../pipeline/draftCampaign";
+import { DraftError, draftCampaign, nameKey, parsePersonNames } from "../pipeline/draftCampaign";
 import { LearningsError, applyLearnings, proposeLearnings, removeLearnings } from "../pipeline/studioLearnings";
 import type { Draftability, GroupView, LearningsView, RunSummary, RunView, StatusView } from "../api-types";
 import { activeJob, claim, release } from "./jobs";
@@ -145,7 +145,7 @@ const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefin
  */
 export function draftability(run: Pick<Run, "steps">, g: Group, min: number): Draftability {
   const referral = g.key === "referral_wrong_person";
-  const targets = referral ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => n.toLowerCase()))).size : g.eligible.length;
+  const targets = referral ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map(nameKey))).size : g.eligible.length;
   if (!allowsFollowUpCampaign(g.key)) return { ok: false, targets, reason: `${g.label} never gets a follow-up campaign` };
   if (run.steps.resolve !== "done") return { ok: false, targets, reason: "The audience has not been checked yet" };
   if (targets < min)
