@@ -19,7 +19,7 @@ import { meta } from "@/lib/ui/categories";
 import { clockTime, splitName } from "@/lib/ui/format";
 import { runLog } from "@/lib/ui/runLog";
 import { STEP_ORDER } from "@/lib/ui/theme";
-import type { ReplyView, RunView as Run } from "@/lib/api-types";
+import { OTHER_ORG_REASON, type ReplyView, type RunView as Run } from "@/lib/api-types";
 import type { Category } from "@/lib/types";
 
 const PENDING_ORB = "#c9c2ff";
@@ -69,7 +69,10 @@ export default function RunView({ runId }: { runId: string }) {
   const progress = run.status === "running" ? finished / STEP_ORDER.length : 1;
   const started = Date.parse(run.createdAt);
   const sourceName = splitName(run.source.name || "Loading source…");
-  const elapsed = ((working && now ? now : Date.parse(run.updatedAt)) - started) / 1000;
+  // The pipeline's own duration. Drafts and learnings move updatedAt later, so a run saved before finishedAt
+  // existed only shows a duration when nothing else has touched it since.
+  const endedAt = run.finishedAt ?? (run.groups.some((g) => g.draft) || run.learnings ? undefined : run.updatedAt);
+  const elapsed = ((run.status === "running" && now ? now : Date.parse(endedAt ?? run.updatedAt)) - started) / 1000;
   const classified = replies.length;
   const total = run.counts.prospectReplies;
   const guarded = run.steps.resolve === "done";
@@ -116,7 +119,7 @@ export default function RunView({ runId }: { runId: string }) {
             {run.status === "done" ? (
               <m.span key="done" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
                 <Chip color="#4fe3d1">
-                  <CheckCircle2 className="size-3.5" /> Complete in {Math.max(1, Math.round(elapsed))}s
+                  <CheckCircle2 className="size-3.5" /> {endedAt ? `Complete in ${Math.max(1, Math.round(elapsed))}s` : "Complete"}
                 </Chip>
               </m.span>
             ) : run.status === "failed" ? (
@@ -139,12 +142,18 @@ export default function RunView({ runId }: { runId: string }) {
               </m.span>
             )}
           </AnimatePresence>
-          <Button variant="ghost" onClick={rerun} disabled={rerunning || (run.status === "running" && !run.interrupted)} className="!px-3.5" aria-label="Run this analysis again">
+          <Button variant="ghost" onClick={rerun} disabled={rerunning || run.otherOrg || (run.status === "running" && !run.interrupted)} className="!px-3.5" aria-label="Run this analysis again">
             {rerunning ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />} Run again
           </Button>
         </div>
       </div>
       {rerunError && <p className="mt-3 text-sm text-rose">{rerunError}</p>}
+      {run.otherOrg && (
+        <p className="mt-4 flex items-start gap-2 rounded-xl border border-amber/30 bg-amber/[0.06] px-4 py-3 text-sm leading-relaxed text-amber">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          {OTHER_ORG_REASON}. You can read it, but drafting and Studio changes are off. To work with this org&apos;s replies, pick a sequence on the home page.
+        </p>
+      )}
 
       {/* progress line */}
       <div className="relative mt-6 h-px w-full bg-line">
@@ -289,7 +298,7 @@ export default function RunView({ runId }: { runId: string }) {
         )}
       </section>
 
-      {run.status === "done" && run.groups.some((g) => g.card) && <LearningsPanel run={run} />}
+      {run.status === "done" && !run.otherOrg && run.groups.some((g) => g.card) && <LearningsPanel run={run} />}
 
       {/* orb tooltip */}
       <AnimatePresence>
