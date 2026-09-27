@@ -24,7 +24,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, "network", "Can't reach the ReplyIQ server");
   }
   const text = await res.text();
-  const json = text ? (JSON.parse(text) as unknown) : null;
+  let json: unknown = null;
+  try {
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // Not JSON: the dev server's HTML 404/500 page, or a proxy page. Say so instead of "Unexpected token '<'".
+    throw new ApiError(res.status, "not_json", `The server answered with a page, not data (HTTP ${res.status}). Reload the app; if it persists, restart the server.`);
+  }
   if (!res.ok) {
     const e = (json as ApiErrorBody | null)?.error;
     throw new ApiError(res.status, e?.code ?? "http_error", e?.message ?? `Request failed (${res.status})`);
