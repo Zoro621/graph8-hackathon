@@ -215,11 +215,11 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
             <AnimatePresence mode="wait" initial={false}>
               {!draft ? (
                 <m.div key="idle" exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-3">
-                  {referral && lookup && !draftable && toLookUp > 0 && (
+                  {referral && lookup && toLookUp > 0 && (
                     <div className="rounded-xl border border-amber/25 bg-amber/[0.05] p-3.5 text-xs leading-relaxed text-muted">
                       <p>
-                        {lookup.found} of the {lookup.named} named people are in graph8&apos;s CRM. graph8 can look the other {toLookUp} up by name and company (about 2 to 4 credits
-                        each) and add whoever it finds to the CRM. Nothing is added to a list yet, and the person who left is never contacted.
+                        {lookup.found} of the {lookup.named} named people are in graph8&apos;s CRM{draftable ? ", enough to draft now" : ""}. graph8 can look the other {toLookUp} up by name and company (about 2 to 4 credits
+                        each) and add whoever it finds to the CRM{draftable ? " first, so the follow-up reaches more of them" : ""}. Nothing is added to a list yet, and the person who left is never contacted.
                       </p>
                       {lookup.enrichedAt && <p className="mt-1.5 text-dim">Last looked up {timeAgo(Date.parse(lookup.enrichedAt), now)}: {lookup.created ?? 0} added.</p>}
                       <div className="mt-3">
