@@ -163,7 +163,7 @@ export async function auditEmail(
   return data.unsupported.map((u) => `unsupported: "${clip(oneLine(u.sentence), 140)}" (${u.reason})`);
 }
 
-async function fullCheck(
+export async function fullCheck(
   llm: Llm | null,
   model: string,
   email: { subject: string; body: string },

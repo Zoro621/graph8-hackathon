@@ -61,8 +61,29 @@ const pricing = (): Group => ({
 });
 
 /** Fake graph8: records every write; docs evolve per poll. */
-function fakeG8(opts: { docs?: CampaignDocument[][]; suppressed?: number[]; suppressionFails?: number[]; notAllowed?: boolean; sequenceFails?: boolean; contacts?: { id: number; first_name: string; last_name: string; work_email: string }[] } = {}) {
-  const log = { lists: [] as { title: string; key?: string }[], added: [] as number[][], campaigns: [] as { body: CampaignCreateBody; key?: string }[], updates: [] as { docId: string; content: string }[], sequences: [] as { body: SequenceCreateBody; key?: string }[], polls: 0 };
+function fakeG8(
+  opts: {
+    docs?: CampaignDocument[][];
+    suppressed?: number[];
+    suppressionFails?: number[];
+    notAllowed?: boolean;
+    sequenceFails?: boolean;
+    contacts?: { id: number; first_name: string; last_name: string; work_email: string }[];
+    calls?: { contact_id: number; disposition: string }[];
+    callsFail?: boolean;
+  } = {},
+) {
+  const log = {
+    lists: [] as { title: string; key?: string }[],
+    added: [] as number[][],
+    removed: [] as number[][],
+    members: new Set<number>(),
+    campaigns: [] as { body: CampaignCreateBody; key?: string }[],
+    campaignUpdates: [] as { id: string; fields: Record<string, unknown> }[],
+    updates: [] as { docId: string; content: string }[],
+    sequences: [] as { body: SequenceCreateBody; key?: string }[],
+    polls: 0,
+  };
   const seqDetail = (id: string, listId: number | null): SequenceDetail => ({
     id, name: "seq", status: "draft", user_email: "owner@example.com", step_count: null, contact_count: null, sequence_kind: "cold_outbound",
     associated_list_id: listId, created_at: null, updated_at: null, description: null, finish_on_reply: true, pinned_mailbox_id: null,
@@ -91,7 +112,22 @@ function fakeG8(opts: { docs?: CampaignDocument[][]; suppressed?: number[]; supp
     },
     addContactsToList: async (_id: number, ids: number[]) => {
       log.added.push(ids);
+      for (const id of ids) log.members.add(id);
       return { conflictSkipped: false };
+    },
+    removeContactsFromList: async (_id: number, ids: number[]) => {
+      log.removed.push(ids);
+      for (const id of ids) log.members.delete(id);
+      return undefined;
+    },
+    listContactsOfList: async () => [...log.members].map((id) => ({ id, work_email: `${id}@example.com` })),
+    updateCampaign: async (id: string, fields: Record<string, unknown>) => {
+      log.campaignUpdates.push({ id, fields });
+      return {};
+    },
+    searchCallResults: async (q: { dispositions?: string[] } = {}) => {
+      if (opts.callsFail) throw new Error("dialer down");
+      return (opts.calls ?? []).filter((c) => !q.dispositions || q.dispositions.includes(c.disposition));
     },
     createCampaign: async (body: CampaignCreateBody, key?: string) => {
       log.campaigns.push({ body, key });
@@ -362,5 +398,67 @@ describe("helpers", () => {
     const f2 = await campaignFields(long as never, "m", makeRun([g]), g, null);
     expect(f2.goal.length).toBeLessThanOrEqual(LIMITS.goal);
     expect(f2.target_persona.length).toBeLessThanOrEqual(LIMITS.persona);
+  });
+});
+
+describe("draftCampaign across channels and runs", () => {
+  it("re-reads call outcomes before adding anyone: a 'no' or a booking on a call keeps that contact out", async () => {
+    await store.save(makeRun([pricing()]));
+    const { g8, log } = fakeG8({ calls: [{ contact_id: 2, disposition: "not_interested" }] });
+    const d = await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(d.status).toBe("failed"); // 1 left, minimum 2
+    expect(d.audienceNotes).toContain("p2@example.com: said not interested / do not call on a call; excluded");
+    expect(log.lists).toHaveLength(0); // stopped before anything was created
+  });
+
+  it("a dialer outage doesn't block the draft: the run's own call check still applies, and it says so", async () => {
+    const run = makeRun([pricing()]);
+    run.channels = { loadedAt: "t", sequencer: [], calls: { status: "ok", contacts: [], outcomes: {}, saidNo: [], booked: [] }, meetings: { status: "none", total: 0, objections: [] }, bookings: { status: "none", total: 0, fromSource: 0, noShows: 0 }, newsletters: { status: "none", count: 0 }, nurtures: { status: "none", count: 0 }, errors: [] };
+    await store.save(run);
+    const { g8 } = fakeG8({ callsFail: true });
+    const d = await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(d.status).toBe("ready");
+    expect(d.warnings.join()).toMatch(/call outcomes could not be re-read/);
+  });
+
+  it("upsertSection finds this group's section written by any run, so a document never holds two", () => {
+    const doc = `Studio text.\n\n${marker("oldrun000001", "pricing_request")}\nOLD CARD\n\n${marker("oldrun000001", "hard_no")}\nother group`;
+    const next = upsertSection(doc, `${marker("newrun000002", "pricing_request")}\nNEW CARD`, marker("newrun000002", "pricing_request"), true)!;
+    expect(next).toContain("NEW CARD");
+    expect(next).not.toContain("OLD CARD");
+    expect(next).toContain("other group"); // another group's section is untouched
+    expect(next.match(/:pricing_request -->/g)).toHaveLength(1);
+    expect(upsertSection(doc, "x", marker("newrun000002", "pricing_request"), false)).toBeNull(); // without refresh: already there
+  });
+
+  it("adopt: the same list, campaign and sequence, synced to this run's audience with its card and brief", async () => {
+    // The earlier run drafted pricing for contacts 1 and 2 (list 77, campaign camp-1, sequence seq-1).
+    await store.save(makeRun([pricing()]));
+    const { g8, log, docContent } = fakeG8();
+    const first = await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(first.status).toBe("ready");
+    // The newer run: contact 1 replied again, contact 3 is new; its group carries the earlier draft (as startDraft copies it).
+    const newer = makeRun([{ ...pricing(), replies: [cl("p1", "pricing_request"), cl("p3", "pricing_request")], eligible: [{ contactId: 1, email: "p1@example.com", threadId: "p1" }, { contactId: 3, email: "p3@example.com", threadId: "p3" }] }]);
+    newer.id = "newrun000002";
+    newer.groups[0].draft = { ...first, status: "drafting", adoptedFrom: "abcdefghijkl" };
+    await store.save(newer);
+    const campaignsBefore = log.campaigns.length;
+    const listsBefore = log.lists.length;
+    const d = await draftCampaign(deps(g8), { runId: "newrun000002", groupKey: "pricing_request", adopt: true });
+    expect(d.status).toBe("ready");
+    expect(d.campaignId).toBe(first.campaignId);
+    expect(log.campaigns).toHaveLength(campaignsBefore); // no new campaign
+    expect(log.lists).toHaveLength(listsBefore); // no new list
+    expect(log.sequences).toHaveLength(1); // the same Sequencer draft, rewritten in place
+    expect(d.sequence?.sequenceId).toBe(first.sequence?.sequenceId);
+    expect(log.removed.at(-1)).toEqual([2]); // contact 2 is not in this run's audience any more
+    expect(log.added.at(-1)).toEqual([3]);
+    expect([...log.members].sort()).toEqual([1, 3]);
+    expect(String(log.campaignUpdates.at(-1)?.fields.brief)).toContain("This follow-up targets 2 contact(s)");
+    // this run's section replaced the earlier one: exactly one pricing section, with the new marker
+    for (const id of ["o", "r"]) {
+      expect(docContent.get(id)!.match(/:pricing_request -->/g)).toHaveLength(1);
+      expect(docContent.get(id)).toContain(marker("newrun000002", "pricing_request"));
+    }
   });
 });
