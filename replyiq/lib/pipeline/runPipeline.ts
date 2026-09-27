@@ -211,6 +211,7 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
   } catch {
     run.status = "failed";
   }
+  run.finishedAt = now().toISOString();
   await persist();
   return run;
 }

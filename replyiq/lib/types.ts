@@ -188,6 +188,8 @@ export interface Run {
   id: string;
   createdAt: string;
   updatedAt: string;
+  /** When the pipeline ended (done or failed). Drafts and learnings later move updatedAt, not this. */
+  finishedAt?: string;
   status: RunStatus;
   orgId: string;
   /** What was analysed: a Studio campaign (all its sequences) or a single sequence. */
