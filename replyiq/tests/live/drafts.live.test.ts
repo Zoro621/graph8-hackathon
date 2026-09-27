@@ -25,12 +25,18 @@ describe("LIVE drafts in graph8 (read-only)", () => {
       expect(full.id).toBe(d.campaignId);
       expect(String(full.audience_list_id)).toBe(String(d.listId));
 
-      // The list holds exactly the drafted audience, and no hard-stop contact.
+      // The list holds the drafted audience, and no hard-stop contact. Out of office: the draft's own list holds the
+      // first return-date wave and each later date has its own list (members checked by verifyRecordedSequence below).
       const members = await g8().listContactsOfList(d.listId!);
       const ids = new Set(members.map((m) => m.id));
-      for (const a of d.audience) expect(ids.has(a.contactId), `contact ${a.contactId} missing from list ${d.listId}`).toBe(true);
+      const waves = (d.sequence?.waves ?? []).filter((w) => w.status !== "retired");
+      const own = waves.find((w) => w.slot === 0)?.contacts ?? d.audience;
+      for (const a of own) expect(ids.has(a.contactId), `contact ${a.contactId} missing from list ${d.listId}`).toBe(true);
+      const inWaves = new Set(waves.flatMap((w) => w.contacts.map((c) => c.contactId)));
+      if (waves.length) for (const a of d.audience) expect(inWaves.has(a.contactId), `contact ${a.contactId} is in no return-date wave`).toBe(true);
       const stopped = new Set(run.groups.flatMap((x) => x.replies).filter((r) => isHardStop(r.category)).map((r) => r.contactId));
-      for (const id of ids) expect(stopped.has(id ?? -1), `hard-stop contact ${id} is in list ${d.listId}`).toBe(false);
+      const lists = [ids, ...(await Promise.all(waves.filter((w) => w.slot > 0 && w.listId).map(async (w) => new Set((await g8().listContactsOfList(w.listId!)).map((m) => m.id)))))];
+      for (const list of lists) for (const id of list) expect(stopped.has(id ?? -1), `hard-stop contact ${id} is in a follow-up list`).toBe(false);
 
       // Patched docs carry ReplyIQ's section.
       for (const kind of ["objections", "replyTemplates"] as const) {
