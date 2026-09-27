@@ -300,6 +300,36 @@ describe("out-of-office drafts in graph8: one Sequencer draft per return date", 
     expect(await verifyRecordedSequence(f.g8, r2)).toEqual([]);
   });
 
+  it("a newer run taking over a one-sequence draft (made before the split) splits it: same campaign and sequence, one new list per later date", async () => {
+    // The earlier run's draft: one list with everyone and one sequence that would email them all on launch.
+    await savedRun();
+    const f = fakeGraph8();
+    const deps = { g8: f.g8, llm: fakeLlm().llm, model: "m", store, pollMs: 0, timeoutMs: 1_000, sleep: async () => {}, now: () => new Date(`${TODAY}T10:00:00Z`) };
+    const first = await draftCampaign(deps, { runId: "abcdefghijkl", groupKey: "out_of_office" });
+    await f.g8.addContactsToList(first.listId!, [2, 3, 4]); // as the old code left it
+    const old = { ...first, sequence: { ...first.sequence!, waves: undefined, wavesCountedOn: undefined } };
+    for (const w of first.sequence!.waves!.slice(1)) f.seqs.delete(w.sequenceId!);
+
+    // A newer run of the same campaign takes it over (the service copies the draft onto the new run first).
+    const newer = await savedRun();
+    newer.id = "mnopqrstuvwx";
+    newer.groups[0].draft = { ...old, status: "drafting", adoptedFrom: "abcdefghijkl" };
+    await store.save(newer);
+    const campaignsBefore = f.log.briefs.length;
+    const d = await draftCampaign(deps, { runId: "mnopqrstuvwx", groupKey: "out_of_office", adopt: true });
+    expect(d.status).toBe("ready");
+    expect(d.campaignId).toBe(first.campaignId);
+    expect(d.sequence!.sequenceId).toBe(first.sequence!.sequenceId);
+    expect(f.members(d.listId!)).toEqual([1]); // the old list now holds only the people already back
+    expect(d.sequence!.waves!.map((w) => [w.slot, w.key, w.delayDays, w.status])).toEqual([
+      [0, "now", 0, "ready"],
+      [1, "2026-10-05", 8, "ready"],
+      [2, "2026-10-07", 10, "ready"],
+    ]);
+    expect(f.log.briefs.length).toBeGreaterThan(campaignsBefore);
+    expect(await verifyRecordedSequence(f.g8, d)).toEqual([]);
+  });
+
   it("the read-back names a wait graph8 didn't keep and a wave list that drifted", async () => {
     await savedRun();
     const f = fakeGraph8();
