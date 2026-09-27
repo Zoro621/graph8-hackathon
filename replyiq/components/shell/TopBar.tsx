@@ -9,6 +9,7 @@ import type { RunView } from "@/lib/api-types";
 import { keys, useResource, useStatus } from "@/lib/client/api";
 import { meta } from "@/lib/ui/categories";
 import { displayName } from "@/lib/ui/format";
+import { connectionState } from "@/lib/ui/connection";
 import { LogoMark } from "./Logo";
 import { openPalette } from "./CommandPalette";
 import { Dot, Kbd } from "../ui/primitives";
@@ -29,13 +30,17 @@ function useCrumbs() {
 
 function ConnectionPill() {
   const { data: s, error } = useStatus();
-  const state = !s && !error ? "loading" : !s?.configured ? "setup" : s.error || error ? "down" : s.write?.allowed ? "live" : "readonly";
+  const { state, message } = connectionState(s, error);
   const view = {
     loading: { color: "#5b6179", label: "Connecting…", title: "Checking the graph8 connection" },
-    setup: { color: "#ff5d7a", label: "Not connected", title: `Add ${s?.missing.join(" and ") ?? "the API keys"} to .env.local` },
-    down: { color: "#ff5d7a", label: /\b401\b/.test(s?.error ?? "") ? "graph8 key rejected" : "graph8 unreachable", title: s?.error ?? error?.message ?? "" },
+    setup: { color: "#ff5d7a", label: "Not connected", title: message ?? "" },
+    error: {
+      color: "#ff5d7a",
+      label: !s ? "Server unreachable" : /\b401\b/.test(message ?? "") ? "graph8 key rejected" : "graph8 unreachable",
+      title: message ?? "",
+    },
     live: { color: "#4fe3d1", label: "graph8 · connected", title: `Writes allowed (${s?.write?.allowed ? s.write.via.replace("_", " ") : ""})${s?.credits != null ? ` · ${Math.round(s.credits).toLocaleString()} credits` : ""}` },
-    readonly: { color: "#ffb547", label: "graph8 · read-only", title: s?.write && !s.write.allowed ? s.write.reason : "" },
+    readonly: { color: "#ffb547", label: "graph8 · read-only", title: message ?? "" },
   }[state];
   return (
     <div className="hidden items-center gap-2 rounded-full border border-line bg-white/[0.03] px-3 py-1.5 text-[11px] text-muted md:flex" title={view.title}>

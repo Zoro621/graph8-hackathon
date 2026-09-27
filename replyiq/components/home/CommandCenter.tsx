@@ -13,6 +13,7 @@ import { Button, Counter, Eyebrow, Kbd, SpotCard } from "../ui/primitives";
 import { openPalette } from "../shell/CommandPalette";
 import { api, keys, revalidate, useRunSummaries, useRunView, useSources, useStatus } from "@/lib/client/api";
 import { ALL_CATEGORIES, meta } from "@/lib/ui/categories";
+import { connectionState } from "@/lib/ui/connection";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 const REASONS = ALL_CATEGORIES.length;
@@ -30,7 +31,7 @@ export default function CommandCenter() {
   const router = useRouter();
   const { data: status, error: statusError } = useStatus();
   const configured = status?.configured === true;
-  const statusState = status ? (status.configured ? "ok" : "setup") : statusError ? "error" : "loading";
+  const { state: statusState, message: statusMessage } = connectionState(status, statusError);
   const sources = useSources(configured);
   const { data: runs } = useRunSummaries(configured);
   const latestDone = runs?.find((r) => r.status === "done" && r.replies > 0);
@@ -294,7 +295,7 @@ export default function CommandCenter() {
         {statusState === "setup" ? (
           <StateNotice kind="setup" compact />
         ) : statusState === "error" ? (
-          <StateNotice kind="error" compact title="Couldn't reach the ReplyIQ server" detail={statusError?.message} />
+          <StateNotice kind="error" compact title={status?.error ? "Couldn't reach graph8" : "Couldn't reach the ReplyIQ server"} detail={statusMessage} />
         ) : statusState === "loading" ? (
           <div className="grid gap-5 lg:grid-cols-2">
             {[0, 1].map((i) => (
