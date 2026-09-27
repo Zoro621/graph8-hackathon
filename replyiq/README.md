@@ -42,6 +42,7 @@ npm run dev
 | `npm run e2e -- [--draft auto\|<group>] [--source <sequenceId>] [--once]` | **End-to-end regression against the real org:** discovers every source with replies, runs the full pipeline twice on each (fresh, then again to prove labels are stable and tags idempotent) and verifies every result by reading graph8 back: tags on the threads, audience safety, live suppression, Answer Card excerpts against fresh documents. `--draft` also drafts one campaign, verifies it in Studio and re-drafts it to prove nothing is duplicated (spends Studio credits). Writes a report to `data/e2e/` (gitignored). Nothing is sent. | M7 |
 | `npm run draft -- [--run <id>] [--group <key>] [--patch-only] [--refresh-docs] [--force]` | Draft a follow-up campaign in graph8 Studio for one group (list + campaign + Answer Card in its docs) **and its follow-up emails as a Sequencer draft** (see below). No `--group` lists the draftable groups. Nothing is sent. | M5 |
 | `npm run draft -- --group <key> --sequence-only [--refresh-sequence] [--previews <n>]` | Only the follow-up sequence of an existing draft. `--refresh-sequence` re-writes its steps in place (no second sequence). `--previews n`: graph8's AI drafts step 1 for n contacts now (about 9 credits each; nothing saved or sent) and ReplyIQ fact-checks each. | M5b |
+| `npm run draft -- --group out_of_office --retime` | Out of office: split the draft by return date again and recount step 1's waits from today (same emails, no model, no credits). | M5c |
 | `npm run learn -- [--run <id>] [--apply \| --remove]` | Company-wide Studio learnings from the run's Answer Cards. Without a flag it only **shows** what it would add to the Messaging House and Proof Catalog (read-only). `--apply` saves exactly that text, touching only ReplyIQ's own marked block, and keeps a local backup of each document first. `--remove` takes the block out again. | M5b |
 | `npm run test:live` | Live integration tests with real graph8 + OpenAI. Read-only, except `tag.live` which tags the synthetic `[DEMO]` sequence in the sandbox org | M2–M3 |
 | `npm run typecheck` | TypeScript check | M0 |
@@ -60,6 +61,12 @@ graph8 Studio's campaign generator marks 7 of 9 documents `failed` in this org, 
   - a second model lists any statement about the company that the facts don't support
   - A step 2 that fails twice is left out; a sequence is never created with unchecked text.
 - **Draft only:** the sequence is created on the draft's list, linked to the Studio campaign, with **no sender attached**. ReplyIQ never runs it. graph8's docs warn that launch sends real email.
+- **Out of office, timed to return dates** (`lib/pipeline/returnDates.ts`):
+  - graph8 has no start-date setting, but step 1's `time_interval` can wait after launch.
+  - Each reply's return date is read from its revisit hint against the reply date. A range gives its last day. Without a year, the date counts as upcoming only up to 120 days ahead; otherwise it's the one before the reply (a stale auto-reply). No date: assumed back 14 days after the reply.
+  - The first email goes on the first working day after that. The draft's own list and sequence carry the first wave ("back already" when anyone is), and each later date gets its own list and sequence with the same steps.
+  - Every sequence is renamed for its date (`PATCH /sequences/{id}`) and read back, wait included.
+  - `--retime` (or "Recount the waiting days") re-splits and recounts from today. Spare drafts are reused before new ones are made, and one that nobody is left in has its list emptied.
 
 ## The app (M6)
 `npm run dev`, then open http://localhost:3000. Every screen shows live data from the graph8 org behind `G8_API_KEY`. Without keys it shows how to connect; there is no sample data.

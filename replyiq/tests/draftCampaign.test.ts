@@ -13,6 +13,7 @@ import {
   marker,
   parsePersonNames,
   referralTargets,
+  timingNote,
   upsertSection,
 } from "../lib/pipeline/draftCampaign";
 import { emptyRun } from "../lib/pipeline/runPipeline";
@@ -150,6 +151,7 @@ function fakeG8(
       return { id: `seq-${log.sequences.length}`, name: body.name, status: "draft" };
     },
     updateSequenceStep: async () => ({}),
+    updateSequence: async () => ({}),
     addSequenceSteps: async () => ({}),
     getSequence: async (id: string) => seqDetail(id, id === "src-seq" ? null : (log.sequences.at(-1)?.body.associated_list_id ?? null)),
     getSequenceSteps: async (id: string) => ({ sequence_id: id, steps: id === "src-seq" ? [] : ((log.sequences.at(-1)?.body.steps ?? []) as unknown as Record<string, unknown>[]) }),
@@ -387,7 +389,11 @@ describe("helpers", () => {
     expect(brief).toContain('"The Team Plan is $99/month for unlimited users." (source: Pricing Matrix)');
     expect(brief).toContain("do NOT claim this:** No cost estimator.");
     const ooo: Group = { key: "out_of_office", label: "Out of office", replies: [cl("o", "out_of_office", { revisitHint: "June 9" })], eligible: [], excluded: [] };
-    expect(buildBrief(makeRun([ooo]), ooo, 1)).toMatch(/Return dates mentioned: June 9/);
+    expect(buildBrief(makeRun([ooo]), ooo, 1)).toMatch(/## Timing\nAdvisory: launch once the timing they mentioned has come \(June 9\)/);
+    expect(buildBrief(makeRun([ooo]), ooo, 1)).not.toMatch(/no delayed start/);
+    // Drafted: the timing is the return-date split as it stands in graph8.
+    const waves = [{ key: "2026-10-05", returnOn: "2026-10-02", firstEmailOn: "2026-10-05", delayDays: 8, contacts: [{ contactId: 1, email: "o@example.com", threadId: "o", returnOn: "2026-10-02" }] }];
+    expect(buildBrief(makeRun([ooo]), ooo, 1, timingNote(ooo, waves, "2026-09-27"))).toContain("1 person back by Fri 2 Oct: first email Mon 5 Oct (step 1 waits 8 days after launch)");
   });
 
   it("campaignFields falls back safely when the model fails, and clips to API limits", async () => {

@@ -96,6 +96,7 @@ Reps get a ready answer, marketing gets a to-do list, and the follow-up campaign
 5. **Write the follow-up as a Sequencer draft:**
    - **Step 1 (day 0):** graph8's AI writes each person's email at send time, allowed only the verified facts.
    - **Step 2 (day 4):** ReplyIQ's own fact-checked email.
+   - **Out of office: timed to each return date.** graph8 has no "start on a date" setting, but step 1 of a sequence can wait a number of days after launch. ReplyIQ reads each return date from the reply ("until June 9", "6/8/26", "back Monday"; no date = assumed two weeks after the reply) and gives each date its own list and Sequencer draft. People already back get their first email on launch. Everyone else gets it on the first working day after they're back. The emails are the same in every draft; only step 1's wait differs.
 6. **Write a channel plan:** why the original didn't convert this group, the new angle, who to focus on, a day-by-day plan across email and calls, and a fact-checked call script and voicemail.
 
 A draft takes about 2½ minutes, mostly waiting for Studio, and about 210 graph8 credits of Studio generation.
@@ -106,6 +107,7 @@ A draft takes about 2½ minutes, mostly waiting for Studio, and about 210 graph8
 - **Take over an earlier draft:** when you re-analyse a sequence, a group that was already drafted by an earlier run is offered "update the existing draft". That reuses the same list, campaign and sequence with the new evidence, instead of paying for a second campaign. The earlier copy becomes read-only.
 - **V1 → V2:** the original sequence, read live from graph8, next to the follow-up, with what changed.
 - **Preview step 1:** graph8's AI writes a sample of step 1 for two contacts (about 18 credits). ReplyIQ fact-checks each preview; nothing is saved or sent.
+- **Recount the waiting days (out of office):** the waits count from launch, so a draft launched a few days later would email everyone a few days late. This button splits the group by return date again and counts each wait from today. People whose date has passed move to "back already". A draft no one is left in has its list emptied, so it can't send. No model and no credits.
 
 ### 6. Teach Studio (company-wide learnings)
 With one approval, ReplyIQ adds a "Heard in the field" block to Studio's **Messaging House** and a "Proof we still need" block to the **Proof Catalog**. It only ever edits its own marked block, reads the result back to verify it, and can take it out again with one click.
@@ -159,7 +161,7 @@ Everything ReplyIQ creates starts with **"ReplyIQ ·"**.
 | Reply reasons | **Engage → Inbox**: threads tagged "ReplyIQ · Pricing request" etc. Filter by the tag; it also feeds Inbox Analytics. |
 | Audience lists | **Lists**: "ReplyIQ · *reason* · *campaign*" |
 | Follow-up campaigns | **Studio → Campaigns**: "ReplyIQ · *reason* follow-up · *campaign*", with the Answer Card in its documents and the strategy in its brief |
-| Follow-up emails | **Engage → Sequencer**: a draft sequence with the same name, linked to the list and campaign, no sender |
+| Follow-up emails | **Engage → Sequencer**: a draft sequence with the same name, linked to the list and campaign, no sender. Out of office: one per return date ("… · back already · …", "… · back by Fri 2 Oct · …"), each on its own list |
 | Referral contacts found by lookup | **Contacts** (CRM) |
 | Company learnings | **Studio → Global**: blocks in Messaging House and Proof Catalog |
 
@@ -237,13 +239,14 @@ Developer commands (tests, the CLI pipeline, drafting from the terminal, the end
 
 ## Tests and verification
 
-- **266 offline tests** (fake graph8 and fake model, no keys needed): `npm test`.
+- **288 offline tests** (fake graph8 and fake model, no keys needed): `npm test`.
 - **Typecheck, lint and production build** on every change.
 - **End-to-end regression against the real org:** `npm run e2e`. It runs the whole pipeline on every sequence with replies, then reads every result back from graph8:
   - every thread carries its tag;
   - no hard stop, suppressed contact or no-on-a-call is eligible;
   - every proof excerpt is found in fresh documents;
   - every draft exists, isn't launched, and has exactly one ReplyIQ section;
+  - out-of-office drafts: every return-date list holds exactly its people, and every step 1 waits as recorded;
   - re-running gives the same labels (100% identical in testing).
 
 ## About the data

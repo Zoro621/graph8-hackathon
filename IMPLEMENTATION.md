@@ -8,6 +8,32 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M5c results (27 Sep, verified live): out-of-office follow-ups timed to each return date
+**Why:** the old timing note said "graph8 has no delayed start". graph8's docs (Sequencer, Sequence Lifecycle) show there is no "start on date X" field; Schedules are only sending windows. But every step has `time_interval` ("delay in seconds after the previous step"), and step 1's delay is "typically 0", not fixed at 0. So a first email can wait after launch.
+
+**What ReplyIQ does** (`lib/pipeline/returnDates.ts`, used by `followupSequence.ts` and `draftCampaign.ts`):
+1. **Reads each return date** from the classifier's `revisitHint`, against the reply's own date:
+   - ISO, `6/8/26`, `5/26 - 6/5` (a range gives its last day), `June 9`, `1st of June`, `Monday July 6, 2026`, `Monday`, `next week`, `in two weeks`, `tomorrow`
+   - no year: upcoming only up to 120 days ahead, else the date before the reply (an auto-reply left on)
+   - no date at all: assumed back 14 days after the reply
+2. **Splits the audience** by the day the first email should go: the first working day after they're back (a Friday return gets a Monday email). "Back already" sends on launch.
+3. **Drafts in graph8:**
+   - The draft's own list and sequence carry the first wave. So the Studio campaign's list never holds someone still away.
+   - Each later date gets its own list and Sequencer draft with the same checked steps; only step 1's `time_interval` differs.
+   - Every sequence is renamed for its date with `PATCH /sequences/{id}` ("… · back already · …", "… · back by Fri 2 Oct · …") and read back, including step 1's wait and each list's members.
+4. **Recount** (`--retime`, or "Recount the waiting days" in the app): re-splits and recounts every wait from today, re-sending the steps graph8 holds, with no model and no credits.
+   - People whose date has passed move to "back already".
+   - Spare drafts are reused before new ones are made.
+   - A draft no one is left in has its list emptied and is renamed "not needed", so launching it reaches no one.
+5. **The brief, the Studio documents and the approval page** state the split and when each first email goes. The page has a "Return dates" tab: who is back when, and each date's list, sequence and read-back.
+
+**Live** (SMB full campaign, run `g5czupq6i4is`, 9 out-of-office contacts, today 27 Sep):
+- All 9 hints were read correctly. 8 are back already (June and July dates, a stale "March 19th", "Monday" after an 18 Sep reply). 1 gave no date ("out of the country"), so they're assumed back Fri 2 Oct, with the first email on Mon 5 Oct.
+- Created: campaign `f550d4bd…` (not launched, audience list 14), sequence `b6cf4e15…` on list 14 (8 people, step 1 waits 0 days) and sequence `61cf5d0b…` on list 15 (1 person, step 1 waits 8 days). Both are drafts with no sender, and step 2 comes 4 days after step 1.
+- graph8 stored and returned the 8-day step 1 wait. A recount re-sent graph8's own stored steps without an error, and `verifyRecordedSequence` returned no problems before and after.
+
+**Tests:** 22 new offline tests (every real hint above, year placement, weekends, the split, the full draft → recount → spare reuse flow against a fake graph8 with real lists and sequences, the read-back naming a lost wait or a drifted list, and the API refusing a recount for other groups).
+
 ## M5b results (27 Sep, verified live): follow-up emails via the Sequencer, and company-wide learnings
 **Why:** Studio's generator loses the campaign's Emails document in this org (see the regression section below). graph8's own SMB sequence (`e470a095…`) shows the path that works:
 - step 1 is `EMAIL` + `ON_DEMAND`: graph8's AI writes each contact's email at send time from `step_data.instructions`

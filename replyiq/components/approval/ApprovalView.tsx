@@ -8,6 +8,7 @@ import FollowupEmails from "./FollowupEmails";
 import AudienceTable from "./AudienceTable";
 import ChannelPlan from "./ChannelPlan";
 import V1V2Diff from "./V1V2Diff";
+import ReturnDates, { ReturnDatesSummary } from "./ReturnDates";
 import DraftProgress from "./DraftProgress";
 import ConfirmDraftModal, { DRAFT_CREDITS } from "./ConfirmDraftModal";
 import StateNotice from "../shell/StateNotice";
@@ -16,9 +17,10 @@ import { api, keys, revalidate, useRunView, useStatus } from "@/lib/client/api";
 import { meta } from "@/lib/ui/categories";
 import { displayName, timeAgo } from "@/lib/ui/format";
 import { useNow } from "@/lib/client/hooks";
+import { timedByReturnDate } from "@/lib/pipeline/returnDates";
 import type { Category } from "@/lib/types";
 
-type Tab = "card" | "emails" | "plan" | "v1v2" | "audience";
+type Tab = "card" | "dates" | "emails" | "plan" | "v1v2" | "audience";
 
 const studioUrl = (campaignId: string) => `https://app.graph8.com/studio?campaignId=${encodeURIComponent(campaignId)}`;
 
@@ -57,13 +59,14 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const busyElsewhere = Boolean(run.job) && !jobHere;
   const draftable = group.draftable.ok;
   const referral = groupKey === "referral_wrong_person";
+  const timed = timedByReturnDate(groupKey); // out of office: one Sequencer draft per return date
   // The number and its label switch together: the draft's list once it has one; otherwise (no draft yet, or one that
   // stopped short of a list) the server's preflight count, labelled as what it is.
   const onList = draft?.audience.length ?? 0;
   const [audienceLabel, audienceSize] = onList > 0 ? ["On the list", onList] : [referral ? "Named people" : "Eligible", group.draftable.targets];
   const runExcluded = run.groups.reduce((n, g) => n + g.excluded.length, 0);
   const revisit = [...new Set(group.replies.map((r) => r.revisitHint).filter(Boolean))] as string[];
-  const current: Tab = tab ?? (draft?.sequence ? "emails" : group.card ? "card" : "audience");
+  const current: Tab = tab ?? (draft?.sequence ? "emails" : group.card ? "card" : timed ? "dates" : "audience");
   const writeBlocked = status?.write && !status.write.allowed ? status.write.reason : null;
 
   // A newer run took this draft over: read-only here. An earlier run's draft of this group can be taken over instead of a new one.
@@ -74,7 +77,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const toLookUp = lookup ? Math.max(0, lookup.named - lookup.found) : 0;
   const enriching = run.job?.kind === "enrich" && run.job.group === groupKey;
 
-  const act = async (action: "create" | "patch" | "previews" | "rewrite" | "adopt" | "enrich", label: string) => {
+  const act = async (action: "create" | "patch" | "previews" | "rewrite" | "adopt" | "enrich" | "retime", label: string) => {
     setPending(label);
     setActionError(null);
     try {
@@ -89,6 +92,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
 
   const tabs: { k: Tab; label: string; show: boolean }[] = [
     { k: "card", label: "Answer Card", show: Boolean(group.card) },
+    { k: "dates", label: "Return dates", show: timed },
     { k: "emails", label: "Follow-up emails", show: true },
     { k: "plan", label: "Channel plan", show: Boolean(draft?.strategy) },
     { k: "v1v2", label: "V1 → V2", show: Boolean(draft?.sequence) },
@@ -155,6 +159,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
           </div>
           <m.div key={current} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }} className="surface rounded-3xl p-5 sm:p-8">
             {current === "card" && group.card && <AnswerCardView card={group.card} color={color} themes={group.themes} />}
+            {current === "dates" && <ReturnDates group={group} sequence={draft?.sequence} color={color} />}
             {current === "emails" && <FollowupEmails group={group} sequence={draft?.sequence} />}
             {current === "plan" && draft?.strategy && <ChannelPlan strategy={draft.strategy} color={color} />}
             {current === "v1v2" && draft && <V1V2Diff runId={run.id} draft={draft} channels={run.channels} color={color} />}
@@ -188,11 +193,15 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                 </p>
               </div>
             </div>
-            {(revisit.length > 0 || draft?.timingNote) && (
-              <p className="mt-4 flex items-start gap-2 rounded-xl border border-line bg-white/[0.02] p-3 text-xs leading-relaxed text-muted">
-                <CalendarClock className="mt-0.5 size-3.5 shrink-0 text-iris" />
-                <span>{draft?.timingNote ?? `They said: ${revisit.slice(0, 3).join(", ")}. Timing is advice only: graph8 has no delayed start.`}</span>
-              </p>
+            {timed ? (
+              <ReturnDatesSummary group={group} sequence={draft?.sequence} />
+            ) : (
+              (revisit.length > 0 || draft?.timingNote) && (
+                <p className="mt-4 flex items-start gap-2 rounded-xl border border-line bg-white/[0.02] p-3 text-xs leading-relaxed text-muted">
+                  <CalendarClock className="mt-0.5 size-3.5 shrink-0 text-iris" />
+                  <span>{draft?.timingNote ?? `They said: ${revisit.slice(0, 3).join(", ")}. Launch once that timing has come.`}</span>
+                </p>
+              )
             )}
           </SpotCard>
 
@@ -284,7 +293,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                       </span>
                     </p>
                   )}
-                  <DraftProgress draft={draft} working={drafting || jobHere} />
+                  <DraftProgress draft={draft} working={drafting || jobHere} timed={timed} />
                   {draft.status === "failed" && draft.error && <p className="rounded-xl border border-rose/25 bg-rose/[0.05] p-3 text-xs leading-relaxed text-rose">{draft.error}</p>}
                   {draft.warnings.length > 0 && draft.status !== "drafting" && (
                     <details className="text-xs text-amber/90">
@@ -331,6 +340,17 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                           {pending === "rewrite" ? <Loader2 className="size-3.5 animate-spin" /> : <PenLine className="size-3.5" />} Rewrite the follow-up emails
                         </Button>
                       )}
+                      {draft.status === "ready" && draft.sequence?.status === "ready" && timed && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => act("retime", "retime")}
+                          disabled={busyElsewhere || Boolean(pending)}
+                          className="!px-3.5 !py-2 text-xs"
+                          title="Splits the group by return date again and counts each wait from today, so the first emails still go the working day after people are back. Same emails; no credits; nothing is sent."
+                        >
+                          {pending === "retime" ? <Loader2 className="size-3.5 animate-spin" /> : <CalendarClock className="size-3.5" />} Recount the waiting days
+                        </Button>
+                      )}
                       {draft.status === "ready" && draft.sequence?.status === "ready" && !referral && (
                         <Button variant="ghost" onClick={() => act("previews", "previews")} disabled={busyElsewhere || Boolean(pending)} className="!px-3.5 !py-2 text-xs" title="graph8's AI drafts step 1 for 2 contacts now (about 9 credits each). Nothing is sent.">
                           {pending === "previews" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />} Preview step 1 (~18 credits)
@@ -348,7 +368,10 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
             <p className="flex items-center gap-2 font-medium text-text">
               <Rocket className="size-3.5 text-lime" /> Launching stays with you
             </p>
-            <p className="mt-1.5">ReplyIQ never attaches a sender. In graph8, connect a mailbox to the follow-up sequence and launch it yourself.</p>
+            <p className="mt-1.5">
+              ReplyIQ never attaches a sender. In graph8, connect a mailbox to the follow-up sequence{(draft?.sequence?.waves?.filter((w) => w.status !== "retired").length ?? 0) > 1 ? "s (one per return date)" : ""} and launch
+              {(draft?.sequence?.waves?.filter((w) => w.status !== "retired").length ?? 0) > 1 ? " them" : " it"} yourself.
+            </p>
             {run.interrupted && draft?.status === "drafting" && (
               <p className="mt-2 flex items-start gap-1.5 text-amber">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> The server stopped while drafting. Resume reuses the list and campaign already created.
@@ -365,6 +388,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
         groupLabel={info.label}
         referral={referral}
         hasCard={Boolean(group.card)}
+        returnDates={group.returnWaves?.length ?? 0}
         audience={group.eligible.length}
         balance={status?.credits}
         onConfirm={() => {

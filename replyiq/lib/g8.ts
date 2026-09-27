@@ -653,6 +653,8 @@ export function createG8Client(opts: G8ClientOptions) {
     /** Change one step of a (draft) sequence. */
     updateSequenceStep: (sequenceId: string, stepId: string, patch: Partial<Pick<SequenceStepConfig, "step_type" | "input_type" | "time_interval" | "step_data">>) =>
       client.write("PATCH", `/sequences/${encodeURIComponent(sequenceId)}/steps/${encodeURIComponent(stepId)}`, patch),
+    /** Rename a (draft) sequence or change its description (PATCH /sequences/{id}: only the fields sent change). */
+    updateSequence: (sequenceId: string, patch: { name?: string; description?: string }) => client.write("PATCH", `/sequences/${encodeURIComponent(sequenceId)}`, patch),
     /** Append steps to a (draft) sequence. */
     addSequenceSteps: (sequenceId: string, steps: SequenceStepConfig[]) => client.write("POST", `/sequences/${encodeURIComponent(sequenceId)}/steps`, { steps }),
     /** Price graph8's AI drafting one email. Free (a POST, but spends nothing and saves nothing). */
