@@ -112,3 +112,11 @@ describe("PR #2 re-review fixes", () => {
     expect(connectionState(stale, { message: "Can't reach the ReplyIQ server" })).toEqual({ state: "error", message: "Can't reach the ReplyIQ server" });
   });
 });
+
+describe("E2E review fixes", () => {
+  it("Studio documents read as names, not file types", async () => {
+    const { docLabel, docList } = await import("../lib/docLabels");
+    expect(docList(["messaging_objections", "campaign_brief", "reply_templates"])).toBe("Messaging & Objections, Campaign Brief, Reply Templates");
+    expect(docLabel("brand_new_doc")).toBe("brand new doc");
+  });
+});

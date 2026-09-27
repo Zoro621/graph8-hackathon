@@ -15,6 +15,7 @@
 import { z } from "zod";
 import type { CampaignDocument, G8Client } from "../g8";
 import { describeError, docText } from "../g8";
+import { docLabel, docList } from "../docLabels";
 import type { Llm } from "../llm";
 import type { RunStore } from "../store";
 import { allowsFollowUpCampaign, categoryInfo, isHardStop } from "../taxonomy";
@@ -409,7 +410,7 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
       await sleep(pollMs);
     }
     draft.docsFailed = docs.filter(isFailed).map((d) => d.file_type ?? d.display_name ?? d.id);
-    if (draft.docsFailed.length) draft.warnings.push(`graph8 Studio failed to generate: ${draft.docsFailed.join(", ")}`);
+    if (draft.docsFailed.length) draft.warnings.push(`graph8 Studio could not generate ${docList(draft.docsFailed)} (a known graph8 issue in this org)`);
 
     // Docs ReplyIQ owns content for. Completed -> append our section (marker-guarded).
     // Failed (empty) -> write our grounded section into it. Still generating -> leave alone, patch later.
@@ -436,12 +437,13 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
       const next = upsertSection(content, render(), marker(run.id, group.key), Boolean(opts.refreshDocs));
       if (next !== null && next !== content) {
         await deps.g8.updateCampaignDoc(draft.campaignId!, meta.id, next);
-        if (!content.trim()) draft.warnings.push(`${label}: Studio left it empty; ReplyIQ wrote its grounded section into it`);
+        if (!content.trim()) draft.warnings.push(`${docLabel(label)}: Studio left it empty; ReplyIQ wrote its grounded section into it`);
       }
       if (!draft.docsPatched.includes(label)) draft.docsPatched.push(label);
       await save(draft);
     }
-    if (draft.docsPending.length) draft.warnings.push(`documents still generating: ${draft.docsPending.join(", ")}; run again with --patch-only to add the Answer Card`);
+    if (draft.docsPending.length)
+      draft.warnings.push(`Studio is still writing ${docList(draft.docsPending)}; add the Answer Card once it finishes ("Add the card to late docs" in the app, --patch-only from the CLI)`);
   };
 
   try {

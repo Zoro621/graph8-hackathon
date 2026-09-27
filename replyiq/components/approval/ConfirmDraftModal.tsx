@@ -17,6 +17,7 @@ export default function ConfirmDraftModal({
   groupLabel,
   audience,
   referral,
+  hasCard,
   balance,
   color,
 }: {
@@ -26,6 +27,7 @@ export default function ConfirmDraftModal({
   groupLabel: string;
   audience: number;
   referral: boolean;
+  hasCard: boolean;
   balance?: number | null;
   color: string;
 }) {
@@ -40,7 +42,10 @@ export default function ConfirmDraftModal({
 
   const rows = [
     { icon: ListPlus, text: referral ? "An audience list of the people they named (looked up in the CRM now)" : `An audience list of up to ${audience} contacts, re-checked for hard stops and suppression first` },
-    { icon: Sparkles, text: `A Studio campaign with this group's Answer Card in its Messaging & Objections and Reply Templates docs` },
+    {
+      icon: Sparkles,
+      text: `A Studio campaign with ${hasCard ? "this group's Answer Card" : "these replies, quoted word for word,"} in its Messaging & Objections and Reply Templates docs`,
+    },
     { icon: Mail, text: "A two-step follow-up sequence in the Sequencer, fact-checked, with no sender attached" },
     { icon: Coins, text: `About ${DRAFT_CREDITS} credits for Studio's document generation${balance != null ? ` · you have ${Math.round(balance).toLocaleString()}` : ""}` },
   ];

@@ -1,6 +1,7 @@
 "use client";
 import { m } from "motion/react";
 import { Check, Loader2, X } from "lucide-react";
+import { docList } from "@/lib/docLabels";
 import type { CampaignDraft } from "@/lib/types";
 
 interface Stage {
@@ -19,9 +20,14 @@ export function draftStages(d: CampaignDraft | undefined): Stage[] {
     {
       label: "Studio writes the campaign docs",
       done: d?.generation === "complete" || Boolean(d?.docsPatched.length),
-      detail: d?.generation === "in_progress" ? "still generating" : d?.docsFailed.length ? `${d.docsFailed.length} failed in Studio` : undefined,
+      detail:
+        d?.generation === "in_progress"
+          ? `still writing${d.docsPending.length ? ` ${docList(d.docsPending)}` : ""}`
+          : d?.docsFailed.length
+            ? `Studio left ${d.docsFailed.length} empty (a known graph8 issue); ReplyIQ filled the ones it owns`
+            : undefined,
     },
-    { label: "Add the Answer Card to the docs", done: Boolean(d?.docsPatched.length), detail: d?.docsPatched.join(", ") || undefined },
+    { label: "Add the Answer Card to the docs", done: Boolean(d?.docsPatched.length), detail: d?.docsPatched.length ? docList(d.docsPatched) : undefined },
     { label: "Write and fact-check the follow-up emails", done: Boolean(seq), detail: seq ? (seq.status === "ready" ? seq.sequenceName : seq.error) : undefined },
   ];
 }
@@ -54,7 +60,7 @@ export default function DraftProgress({ draft, working }: { draft: CampaignDraft
             </span>
             <span className="min-w-0">
               <span className={s.done ? "text-text" : isActive ? "text-iris" : isFailed ? "text-rose" : "text-dim"}>{s.label}</span>
-              {s.detail && <span className="block truncate text-xs text-dim">{s.detail}</span>}
+              {s.detail && <span className="line-clamp-2 block text-xs text-dim">{s.detail}</span>}
             </span>
           </m.li>
         );

@@ -212,7 +212,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                   {draft.status === "failed" && draft.error && <p className="rounded-xl border border-rose/25 bg-rose/[0.05] p-3 text-xs leading-relaxed text-rose">{draft.error}</p>}
                   {draft.warnings.length > 0 && draft.status !== "drafting" && (
                     <details className="text-xs text-amber/90">
-                      <summary className="cursor-pointer">{draft.warnings.length} note{draft.warnings.length === 1 ? "" : "s"} from graph8</summary>
+                      <summary className="cursor-pointer">{draft.warnings.length} note{draft.warnings.length === 1 ? "" : "s"} on this draft</summary>
                       <ul className="mt-2 flex flex-col gap-1">
                         {draft.warnings.map((w) => (
                           <li key={w}>⚠ {w}</li>
@@ -270,6 +270,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
         color={color}
         groupLabel={info.label}
         referral={referral}
+        hasCard={Boolean(group.card)}
         audience={group.eligible.length}
         balance={status?.credits}
         onConfirm={() => {

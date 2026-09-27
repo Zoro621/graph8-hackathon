@@ -16,6 +16,9 @@ type TagClient = Pick<G8Client, "listInboxTags" | "createInboxTag" | "tagThread"
 
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+/** Who a warning is about, in words a person recognises (not a thread id). */
+const who = (r: Classified) => `${r.contactName ?? r.contactEmail ?? "A contact"}${r.company ? ` (${r.company})` : ""}`;
+
 /** Tag ids for the given categories, creating the missing tags. */
 export async function ensureTags(client: TagClient, keys: Category[]): Promise<{ ids: Map<Category, string>; created: string[] }> {
   const wanted = [...new Set(keys)];
@@ -74,7 +77,7 @@ export async function tagThreads(client: TagClient, groups: Group[], opts: { con
       res.failed++;
       const error = err instanceof Error ? err.message : String(err);
       g.replies[i] = { ...r, tag: { id, name, status: "failed", error } };
-      res.warnings.push(`could not tag thread ${r.threadId.slice(0, 12)}: ${error}`);
+      res.warnings.push(`${who(r)}: could not tag the thread (${error})`);
       return;
     }
     // Old ReplyIQ tags from an earlier run that no longer match.
@@ -85,7 +88,7 @@ export async function tagThreads(client: TagClient, groups: Group[], opts: { con
         res.staleRemoved++;
       } catch {
         res.staleKept++;
-        res.warnings.push(`thread ${r.threadId.slice(0, 12)} still carries old tag "${t.name}" (graph8 would not remove it)`);
+        res.warnings.push(`${who(r)}: thread still carries old tag "${t.name}" (graph8 would not remove it)`);
       }
     }
   };
