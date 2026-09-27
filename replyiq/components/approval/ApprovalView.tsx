@@ -53,6 +53,8 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const busyElsewhere = Boolean(run.job) && !jobHere;
   const draftable = group.draftable.ok;
   const referral = groupKey === "referral_wrong_person";
+  // Before a draft exists, the server's own count: distinct named people for referrals, eligible contacts otherwise.
+  const audienceSize = draft?.audience.length || group.draftable.targets;
   const runExcluded = run.groups.reduce((n, g) => n + g.excluded.length, 0);
   const revisit = [...new Set(group.replies.map((r) => r.revisitHint).filter(Boolean))] as string[];
   const current: Tab = tab ?? (draft?.sequence ? "emails" : group.card ? "card" : "audience");
@@ -74,7 +76,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const tabs: { k: Tab; label: string; show: boolean }[] = [
     { k: "card", label: "Answer Card", show: Boolean(group.card) },
     { k: "emails", label: "Follow-up emails", show: true },
-    { k: "audience", label: `Audience · ${draft?.audience.length || (referral ? group.replies.length : group.eligible.length)}`, show: true },
+    { k: "audience", label: `Audience · ${audienceSize}`, show: true },
   ];
 
   const flow = [
@@ -151,7 +153,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                   <Users className="size-3.5" /> {referral ? "Named people" : "Eligible"}
                 </p>
                 <p className="mt-1 text-3xl font-semibold tabular-nums">
-                  <Counter value={draft?.audience.length || (referral ? group.replies.filter((r) => r.referredName).length : group.eligible.length)} />
+                  <Counter value={audienceSize} />
                 </p>
                 <button onClick={() => setTab("audience")} className="text-[11px] text-rose/90 hover:underline">
                   {group.excluded.length} excluded here →
