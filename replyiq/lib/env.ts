@@ -15,7 +15,7 @@ const schema = z.object({
   G8_WRITE_ORG_ID: z.string().trim().min(1).optional().or(z.literal("").transform(() => undefined)),
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is missing"),
   OPENAI_CLASSIFY_MODEL: z.string().default("gpt-6-luna"),
-  OPENAI_REASON_MODEL: z.string().default("gpt-6-sol"),
+  OPENAI_REASON_MODEL: z.string().default("gpt-6-luna"),
   ENABLE_LAUNCH: boolish,
   MIN_GROUP_SIZE: z.coerce.number().int().min(1).default(2),
   // Owner of follow-up sequences ReplyIQ creates. Optional: defaults to the original sequence's owner.

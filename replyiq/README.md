@@ -16,7 +16,7 @@ G8_API_KEY=                          # graph8 personal key (Profile -> Developer
 G8_WRITE_ORG_ID=                     # optional: allow writes on one more org (the sandbox org is already allowed)
 OPENAI_API_KEY=                      # OpenAI platform key
 OPENAI_CLASSIFY_MODEL=gpt-6-luna
-OPENAI_REASON_MODEL=gpt-6-sol
+OPENAI_REASON_MODEL=gpt-6-luna
 ENABLE_LAUNCH=false                  # stays off until a sandbox mailbox exists
 MIN_GROUP_SIZE=2
 G8_SEQUENCE_OWNER_EMAIL=              # optional: owner of follow-up sequences (default: the original sequence's owner)
@@ -57,12 +57,24 @@ graph8 Studio's campaign generator marks 7 of 9 documents `failed` in this org, 
   - A step 2 that fails twice is left out; a sequence is never created with unchecked text.
 - **Draft only:** the sequence is created on the draft's list, linked to the Studio campaign, with **no sender attached**. ReplyIQ never runs it. graph8's docs warn that launch sends real email.
 
+## The app (M6)
+`npm run dev`, then open http://localhost:3000. Every screen shows live data from the graph8 org behind `G8_API_KEY`. Without keys it shows how to connect; there is no sample data.
+1. **Home:** the sequences discovered in the org, with reply counts, and recent runs. The 3D core shows real replies from the latest finished run.
+2. **Run:** the pipeline runs in the background (tags are written to the graph8 Inbox); the page follows each step, the replies settling into their groups, themes, exclusions and Answer Cards.
+3. **Follow-up:** after a press-and-hold approval, drafts the group's follow-up in graph8 (list, Studio campaign, fact-checked Sequencer draft). Launching stays with a person in graph8.
+4. **Teach Studio:** proposes the run's learnings for the Messaging House and Proof Catalog; saves them only after approval, with undo.
+
+The API routes (`app/api/*`) are listed in `../IMPLEMENTATION.md` (Integration status).
+
 ## Layout
 ```
 lib/env.ts          validated env (server-only)
 lib/pipeline/       pipeline steps (M2 onwards)
+lib/server/         API service layer + job lock (routes in app/api/)
+lib/client/         browser data layer (fetch cache, polling)
+lib/ui/             category colours, step names, agent log
 components/         UI components (M6)
-scripts/            check-env, spike, run
+scripts/            check-env, spike, run, draft, learn, e2e
 tests/              vitest tests and fixtures
 data/runs/          run state as JSON (gitignored)
 ```
