@@ -1,0 +1,378 @@
+[
+  {
+    "threadId": "e891cb33-6af1-5290-83f5-a413cf98354d",
+    "sequenceId": "96118ffd-cde3-5a7c-b57a-3ea8a0a02296",
+    "contactEmail": "prospect-12@example.com",
+    "contactId": 880026092011,
+    "contactName": "Demo Contact 12",
+    "company": "Fictional Company 3",
+    "subject": "[DEMO] Can we schedule a fictional follow-up next week?",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+    "repliedAt": "2026-09-25T00:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T23:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+        "date": "2026-09-25T00:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
+    "existingTags": [
+      {
+        "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+        "name": "ReplyIQ · Meeting request"
+      }
+    ]
+  },
+  {
+    "threadId": "b4350be9-0d67-55fc-8988-7756d98acc2c",
+    "sequenceId": "96118ffd-cde3-5a7c-b57a-3ea8a0a02296",
+    "contactEmail": "prospect-11@example.com",
+    "contactId": 880026092010,
+    "contactName": "Demo Contact 11",
+    "company": "Fictional Company 3",
+    "subject": "[DEMO] Out of office in this training scenario.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Out of office in this training scenario.",
+    "repliedAt": "2026-09-24T23:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T22:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Out of office in this training scenario.",
+        "date": "2026-09-24T23:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Out of office in this training scenario.",
+    "existingTags": [
+      {
+        "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+        "name": "ReplyIQ · Out of office"
+      }
+    ]
+  },
+  {
+    "threadId": "9c4c95de-d22c-5b6d-bead-cf68e8e001c8",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-02@example.com",
+    "contactId": 880026092001,
+    "contactName": "Demo Contact 02",
+    "company": "Fictional Company 1",
+    "subject": "[DEMO] Please send fictional pricing details for the exercise.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+    "repliedAt": "2026-09-24T14:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T13:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+        "date": "2026-09-24T14:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
+    "existingTags": [
+      {
+        "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+        "name": "ReplyIQ · Pricing request"
+      }
+    ]
+  },
+  {
+    "threadId": "ddbbc087-de64-549e-9cc3-21c8f2774f4c",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-04@example.com",
+    "contactId": 880026092003,
+    "contactName": "Demo Contact 04",
+    "company": "Fictional Company 1",
+    "subject": "[DEMO] Please remove this fictional contact from the sample list.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+    "repliedAt": "2026-09-24T16:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T15:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+        "date": "2026-09-24T16:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
+    "existingTags": [
+      {
+        "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+        "name": "ReplyIQ · Unsubscribe"
+      }
+    ]
+  },
+  {
+    "threadId": "64336ae0-8a2c-577b-a4ee-9ce8084c6286",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-10@example.com",
+    "contactId": 880026092009,
+    "contactName": "Demo Contact 10",
+    "company": "Fictional Company 3",
+    "subject": "[DEMO] Please remove this fictional contact from the sample list.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+    "repliedAt": "2026-09-24T22:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T21:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+        "date": "2026-09-24T22:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
+    "existingTags": [
+      {
+        "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+        "name": "ReplyIQ · Unsubscribe"
+      }
+    ]
+  },
+  {
+    "threadId": "129e7abf-bac3-5ce9-9b75-f65ad3db1c4d",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-08@example.com",
+    "contactId": 880026092007,
+    "contactName": "Demo Contact 08",
+    "company": "Fictional Company 2",
+    "subject": "[DEMO] Please send fictional pricing details for the exercise.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+    "repliedAt": "2026-09-24T20:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T19:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+        "date": "2026-09-24T20:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
+    "existingTags": [
+      {
+        "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+        "name": "ReplyIQ · Pricing request"
+      }
+    ]
+  },
+  {
+    "threadId": "4e0c9d09-1a85-5e67-94e6-38c28a64a39a",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-06@example.com",
+    "contactId": 880026092005,
+    "contactName": "Demo Contact 06",
+    "company": "Fictional Company 2",
+    "subject": "[DEMO] Can we schedule a fictional follow-up next week?",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+    "repliedAt": "2026-09-24T18:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T17:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+        "date": "2026-09-24T18:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
+    "existingTags": [
+      {
+        "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+        "name": "ReplyIQ · Meeting request"
+      }
+    ]
+  },
+  {
+    "threadId": "93b93da0-6222-5ebc-a39e-a4e19a61af1c",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-07@example.com",
+    "contactId": 880026092006,
+    "contactName": "Demo Contact 07",
+    "company": "Fictional Company 2",
+    "subject": "[DEMO] Interested in a demo. Could you share the sample agenda?",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+    "repliedAt": "2026-09-24T19:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T18:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+        "date": "2026-09-24T19:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
+    "existingTags": [
+      {
+        "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+        "name": "ReplyIQ · Interested, no meeting"
+      }
+    ]
+  },
+  {
+    "threadId": "e94cf4c2-b87b-5439-ad96-111d20a53b5d",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-05@example.com",
+    "contactId": 880026092004,
+    "contactName": "Demo Contact 05",
+    "company": "Fictional Company 2",
+    "subject": "[DEMO] Out of office in this training scenario.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Out of office in this training scenario.",
+    "repliedAt": "2026-09-24T17:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T16:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Out of office in this training scenario.",
+        "date": "2026-09-24T17:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Out of office in this training scenario.",
+    "existingTags": [
+      {
+        "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+        "name": "ReplyIQ · Out of office"
+      },
+      {
+        "id": "2e92f4d1-8b58-4e1c-b8da-4ff7c1a16b29",
+        "name": "ReplyIQ · Needs review"
+      }
+    ]
+  },
+  {
+    "threadId": "5f2b9586-63c3-55ea-b693-ff36d420df63",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-09@example.com",
+    "contactId": 880026092008,
+    "contactName": "Demo Contact 09",
+    "company": "Fictional Company 3",
+    "subject": "[DEMO] Not interested at this time.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Not interested at this time.",
+    "repliedAt": "2026-09-24T21:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T20:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Not interested at this time.",
+        "date": "2026-09-24T21:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Not interested at this time.",
+    "existingTags": [
+      {
+        "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+        "name": "ReplyIQ · Hard no"
+      }
+    ]
+  },
+  {
+    "threadId": "fbf2b049-4546-5b89-a82e-5e15a4124f71",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-03@example.com",
+    "contactId": 880026092002,
+    "contactName": "Demo Contact 03",
+    "company": "Fictional Company 1",
+    "subject": "[DEMO] Not interested at this time.",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Not interested at this time.",
+    "repliedAt": "2026-09-24T15:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T14:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Not interested at this time.",
+        "date": "2026-09-24T15:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Not interested at this time.",
+    "existingTags": [
+      {
+        "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+        "name": "ReplyIQ · Hard no"
+      }
+    ]
+  },
+  {
+    "threadId": "80528b43-a831-5cb2-ba30-3ee1c463999c",
+    "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+    "contactEmail": "prospect-01@example.com",
+    "contactId": 880026092000,
+    "contactName": "Demo Contact 01",
+    "company": "Fictional Company 1",
+    "subject": "[DEMO] Interested in a demo. Could you share the sample agenda?",
+    "outbound": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+    "replyText": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+    "repliedAt": "2026-09-24T13:05:34.331032+00:00",
+    "conversation": [
+      {
+        "from": "us",
+        "text": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+        "date": "2026-09-24T12:05:34.331032+00:00"
+      },
+      {
+        "from": "prospect",
+        "text": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+        "date": "2026-09-24T13:05:34.331032+00:00"
+      }
+    ],
+    "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
+    "existingTags": [
+      {
+        "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+        "name": "ReplyIQ · Interested, no meeting"
+      }
+    ]
+  }
+]

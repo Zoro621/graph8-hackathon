@@ -33,6 +33,37 @@ This plan is built only from the stored docs and OpenAPI spec (`scratchpad/opena
 | **Studio → Campaign** | 5 AI **ideas** about graph8 itself; none converted or launched. | The seeded sequences aren't linked to any Studio campaign, so `/campaigns/{id}/full` → `linked_sequences` finds nothing. The follow-up is still created as a new Studio campaign. |
 | **Studio → Global** | 34/43 generated. Context 21/21 **Done**, including **Proof Catalog, Pricing Matrix, Value Props, Messaging House**, Offer Brief, Positioning Matrix. Research 0/6 and Targeting 0/3 not started. A "enter your domain" onboarding popup appears (left untouched). | The Answer Card inputs exist, so no generation is needed. The docs describe graph8's own offer, not MapleMetrics/OrbitDesk. Treat the org as selling graph8 and say so. |
 
+## 0b. Demo campaign (found at runtime, not hardcoded): graph8 Tech SMB Sales
+ReplyIQ is **not tied to any campaign**. At runtime it discovers every sequence in the org (`lib/pipeline/sources.ts`), counts the replies for each from the inbox, links each sequence to its Studio campaign, and works on whichever you pick. If you don't pick, it uses the one with the most replies. Campaign documents are found by Studio `file_type` or by name, never by ID.
+
+For the demo, the team is using the graph8 team's **real** "Kill Your Tool Stack — Tech SMB Sales" campaign (a CIENCE reactivation offering graph8's three data products on a no-cost tier). It's also what discovery picks by default today, because it has the most replies. The IDs below are just what discovery found on 26 Sep; nothing in the code depends on them.
+
+| Piece | ID / value |
+|---|---|
+| Studio campaign | `6a5f3380-e200-577d-b057-e705ffbc7e7a` "[Full campaign] Kill Your Tool Stack — Tech SMB Sales" (paused, launched). Goal: *no-cost-tier signups + GTM strategist meetings*. |
+| Sequence | `e470a095-5a1a-5a3e-874e-450ef15a9253` (2 emails: "An update from CIENCE" → "The full picture in one page"; stop on reply) |
+| Audience list | `1900262001` "[Full campaign] Tech SMB Sales contacts": 7,531 contacts |
+| Mailbox / workspace | `campaign-saad@example.com` / "Graph8 Tech SMB Sales — full campaign" (`916ffd65…`) |
+| Campaign docs (V1) | 15 docs, including `messaging_objections` (12.6k chars, angles and objection handling), `reply_templates` (22.6k), `emails`, `campaign_brief` |
+| Results | 2,212 sent, **19 replies** (0.3%). graph8's metrics rollup reports `metric_status: unknown`, so it shows sent receipts only. |
+
+**What the 19 replies are** (my first read; M2 will confirm):
+
+| Group | About | Examples |
+|---|---|---|
+| Out of office | 8 | "OOO until 6/8/26", "on PTO until June 9" |
+| Left the company, contact X | 5–6 | "no longer with ANM, please reach out to Kurt…", "reach out to my manager: Rob Moore" |
+| Left, no replacement named | 1–2 | "this employee is no longer with the company" |
+| Not interested | 1 | "No thank you. Not at all interested." |
+| Meeting booked | 1 | SPARXiQ: an 8-message thread ending in a confirmed meeting |
+| Auto-reply / invalid address | 2 | "the email address you attempted to reach is no longer…" |
+
+**What this means for the product**
+1. **The strongest real value is the referral follow-up.** About a third of the replies name a replacement ("contact X instead"). ReplyIQ turns them into a list of the named people with a tailored "you were referred by…" campaign. The referral step should move from stretch to core. Looking the person up (`POST /enrichment/lookup/person`) costs credits, so it only runs on approval.
+2. **Out-of-office replies carry return dates.** ReplyIQ can hold these contacts and suggest re-contacting after the date. That stays advisory, because there's no delayed start in the API.
+3. **Real objections are rare in this data.** The Answer Cards still work: they compare against the campaign's own Messaging & Objections doc and the Studio Proof Catalog. The richer replies the team will seed (price, competitor, timing) make them shine without any code change.
+4. **graph8's own analytics show 0 meetings and "unknown" status for this campaign**, while ReplyIQ can see the booked meeting in the thread. That's a good demo point.
+
 ## 1. Verified API surface (the endpoints we call)
 Base URL: `https://be.graph8.com/api/v1`. Every request sends `Authorization: Bearer <key>`.
 
@@ -193,7 +224,7 @@ replyiq/
 | Time | Beat |
 |---|---|
 | 0:00 | **Problem:** graph8's Inbox Analytics shows the Interested %, and every other reply dead-ends. |
-| 0:40 | Run ReplyIQ on the finished `[DEMO] Product introduction history` sequence: the 10 replies are grouped with counts and quotes. Refresh Inbox Analytics: it goes from **0 tagged** to our categories, inside graph8's own UI. |
+| 0:40 | Run ReplyIQ on the graph8 team's real **Tech SMB Sales** campaign (2,212 sent, 19 replies). The replies are grouped with counts and quotes: out of office with return dates, "left, contact X" referrals, a booked meeting graph8's metrics missed. Then open graph8's own Inbox and filter by "ReplyIQ · Referral": exactly those threads, each carrying the ReplyIQ badge. (graph8's Inbox Analytics doesn't count the seeded threads, so it isn't used.) |
 | 1:40 | **Price Answer Card:** proof we have (cited from the Proof Catalog), the ⚠ proof gap ("no ROI case study for mid-market"), and how to answer. |
 | 2:40 | Open the draft follow-up campaign in Studio. Show the approval screen (V1→V2, exclusions, cost), then **Approve → sandbox launch → outbox**. |
 | 3:40 | **Learning loop:** the Answer Card is now in the campaign's objection doc, and the next generation uses it. |

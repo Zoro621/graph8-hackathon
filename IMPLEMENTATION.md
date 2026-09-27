@@ -8,6 +8,262 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ---
 
+## M5b results (27 Sep, verified live): follow-up emails via the Sequencer, and company-wide learnings
+**Why:** Studio's generator loses the campaign's Emails document in this org (see the regression section below). graph8's own SMB sequence (`e470a095…`) shows the path that works:
+- step 1 is `EMAIL` + `ON_DEMAND`: graph8's AI writes each contact's email at send time from `step_data.instructions`
+- step 2 is `MANUAL_TEMPLATE`
+
+**What ReplyIQ builds** (`lib/pipeline/followupSequence.ts`, run as the last stage of `npm run draft`, or on its own with `--sequence-only`):
+1. **Facts:**
+   - the Answer Card's verified proof
+   - up to 6 facts a model picks from the company's documents and the original sequence's own copy (the team's approved pitch), each kept only if its excerpt is verbatim in its source
+   - voice documents (Brand Voice, style guides, Compliance) guide tone but are never facts
+2. **Step 2 text:** written by ReplyIQ from those facts only. Fact-check:
+   - deterministic: every number must be in a fact; merge fields from a fixed list; no placeholders; length; the original campaign's hard rules turned into checks (banned word, no dashes)
+   - model audit: lists any statement about the company that the facts don't support; it is told where the email sits in the sequence
+   - one rewrite with the problems; if it still fails, step 2 is left out
+3. **Step 1 instructions**, assembled by code in the same shape as graph8's own AI steps:
+   - what the group said (verbatim) and the goal (the card's angle, else one per follow-up type)
+   - the facts, the never-claim list and the original campaign's rules
+   - the classifier's internal notes are stripped out
+4. **`POST /sequences`:**
+   - draft, on the draft's list, linked to the Studio campaign
+   - owner = the original sequence's owner (or `G8_SEQUENCE_OWNER_EMAIL`)
+   - **no sender attached, never run**
+   - read back and compared; `--refresh-sequence` re-writes the steps in place with `PATCH`/`POST .../steps`, so there is never a second sequence
+5. **Previews** (`--previews n`): graph8's `POST /sequencer/content/email/generate` drafts step 1 per contact with CRM fields only, as at send time. ReplyIQ fact-checks each, and numbers from the recipient's own details are allowed. graph8's `/estimate` prices each first (about 9 credits; 0 when cached).
+
+**Live:**
+- `[DEMO]` "Interested, no meeting" → sequence `82997ef4…` (list 4): step 2 passed first time, both graph8 previews passed.
+- SMB "Out of office" → sequence `c5a08249…` (list 3, 9 contacts), no previews because these are real people:
+  - 5 rules carried over from the team's own instructions (never "free", no dashes, no meeting asks…)
+  - facts from the original sequence's copy; step 2 passed first time
+  - both sequences were read back as matching, with no sender attached.
+- **Audit tuning, from real output:**
+  - graph8's AI wrote "what a 25-minute demo *typically* covers", and the audit rightly flagged the generalisation.
+  - Step 2's "in case it got buried" was wrongly flagged until the auditor was told where the email sits in the sequence.
+  - Wording about the meeting itself ("what I'd walk you through") is now treated as fine.
+
+**Company-wide learnings** (`lib/pipeline/studioLearnings.ts`, `npm run learn`):
+- **Propose** (read-only): turns the run's Answer Cards into two blocks.
+  - Messaging House: "Heard in the field", with verbatim quotes, how to answer, verified proof and don't-claim.
+  - Proof Catalog: "Proof we still need", listing the proof gaps.
+  - The proposal is stored on the run for review.
+- **Apply** (`--apply`, after approval): saves exactly the reviewed text.
+  - It re-reads each document first and replaces only ReplyIQ's block, marked with start and end comments; there is one block per source campaign, so re-runs don't duplicate. Everyone else's text is untouched.
+  - It reads the document back to verify and records graph8's new version number.
+- **Applied live after approval** (`[DEMO]` run `t5ee87bjjv8y`) to the Messaging House and the Proof Catalog. Each block was read back and found exactly once.
+- **Undo** (`npm run learn -- --remove`) takes ReplyIQ's block out and leaves the rest of the document as it is. `--apply` also keeps a local backup of each document as it was before ReplyIQ's first save (in the run file; `data/runs` is gitignored).
+- **Version history finding:** a document's *first* save through the API became version 1 containing the new text, so the text from before it was not in graph8's history. `current_version` counts saves, but `version` stayed at 1.
+  - To create a real restore point, the undo was tested live: remove, which restored the original as **version 2**, then re-apply, which gave **version 3**, identical to the first save.
+  - So graph8's history now has the pre-ReplyIQ text, and the local backups match it.
+
+## Integration status (27 Sep)
+- **Backend ↔ graph8:** every stage is integrated and verified live by reading graph8 back. The chain is discovery, then fetch, classify, themes, tags, audience, Answer Cards, Studio draft, follow-up sequence (with previews) and company-wide learnings. Commands: `npm run e2e`, `npm run test:live`, `npm run spike`.
+- **Backend ↔ UI: not connected yet.**
+  - The branch `feat/replyiq-ui` forked at M0 (`66662b7`), before M1–M5b. It runs on its own demo engine and fixtures (`lib/demo/*`), with an older copy of `lib/types.ts` and `lib/taxonomy.ts`. It doesn't call the backend.
+  - To integrate:
+    1. Rebase it on `main`, keeping `main`'s `lib/types.ts` / `lib/taxonomy.ts`. The UI's shapes are mostly a subset, but `Run.source` differs (selector + sequences, not `sequenceId`), and there is a `themes` step and a `meeting_booked` category.
+    2. Add the API routes the UI expects (`GET /api/sources`, `POST /api/runs`, `GET /api/runs/[id]`, draft, sequence preview, learnings propose/apply/remove) as thin wrappers over the existing library functions.
+    3. Swap the demo engine for those routes: the engine header already says this is a one-file change.
+
+**Tests (final run, 27 Sep):** 205 offline, 22/22 live, 26/26 spike checks, `npm run e2e -- --once` 31 passed and 0 failed (the 1 warning is the stale Demo Contact 05 tag). The 40 new offline tests cover: rules extraction, number, merge-field and placeholder checks, claim verification, instructions, retries, fail-closed audit, previews, reuse, in-place refresh, read-back, block upsert keeping others' edits, propose/apply/remove with backup, and the client calls. The live tests and the e2e run now also verify every recorded sequence, and every applied Studio block, against graph8.
+
+## End-to-end regression (27 Sep, `npm run e2e -- --draft auto`)
+One command runs the whole chain against the real org and **verifies every result by reading graph8 back** (`scripts/e2e.ts`; report in `data/e2e/`, gitignored). Result: **37 passed, 1 warning, 0 failed** in 8 minutes.
+- **Safety:** writes allowed only via the org allowlist; a client with an empty allowlist is refused before any request leaves (checked live).
+- **Discovery:** 6 sequences, 4 with replies, found at runtime: SMB full campaign (19), `[DEMO]` OrbitDesk (10), `[Hackathon copy]` SMB (9), `[DEMO]` MapleMetrics (2).
+- **Every source, twice:** each run finished with every critical step done. Invariants held on all 40 replies: one group each, verbatim quotes, themes covering each group exactly once, and every thread carrying its ReplyIQ tag when read back from graph8. The audience never includes a hard stop, and suppression was re-checked live for all 22 eligible contacts. The second run gave **100% identical labels** on every source, with no thread re-tagged.
+- **Answer Cards** (`[DEMO]` OrbitDesk): 2 cards, 5 proof excerpts re-verified verbatim against freshly read documents, 2 proof gaps named, 0 unverified claims.
+- **Draft:** fresh campaign `e09cbc54…` for "Interested, no meeting" (list 4, 2 contacts). Read back: the audience list is attached, the draft is not launched, no hard-stop or suppressed contact is in the list, and the Answer Card section appears exactly once. A second draft reused the same campaign and list. All 3 recorded drafts are still intact.
+- **Credits:** about **212 per draft**, from graph8's own ledger (`GET /usage/transactions`). The same pattern followed each of the 3 drafts:
+  - 7 Studio LLM calls at 20 credits each (140)
+  - 4 image generations at 5 each (20)
+  - 3 Studio Global LLM calls, arriving up to 14 minutes later (52)
+- **Why Studio "fails" 7 of 9 documents** (the same on all 3 drafts): it's a graph8 bug in saving, not in generation.
+  - The ledger shows graph8 **did generate and bill** each of the 7 documents (up to about 6k output tokens each). Every one was marked `failed` within 0.1 s of being charged, and its content was discarded.
+  - `GET /campaigns/{id}/generation-progress` reports "Generation failed before starting - task may have crashed".
+  - `GET /campaigns/{id}/status` crashes with a 500: `'CBCampaignMetadata' object has no attribute 'generation_duration_seconds'`. That looks like the same save step breaking.
+  - Only the 2 template documents (sequence, step catalog) survive. They are generated without an LLM call and without that save step.
+- **Findings:**
+  - One `[DEMO]` thread (Demo Contact 05) keeps an older "Needs review" tag next to its current "Out of office". graph8's only removal endpoint returns 404 for seeded threads.
+  - The `[Hackathon copy]` replies are anonymised placeholders ("Original private reply omitted"), so all 9 correctly land in Needs review. Seeding real reply text needs no code change.
+  - Both sender mailboxes are `disconnected`. Studio also didn't generate the `emails` document, so a launch would still be blocked after connecting a mailbox.
+  - **Spurious 401:** when 6 live test files started together, graph8 answered two reads with 401 "Invalid API key", though the same key worked right before and after. Two fixes:
+    - `lib/g8.ts` now retries a read once after a 401; writes are never retried, and a key that is really invalid still fails.
+    - Live test files run one at a time.
+- **All layers after the fixes:**
+  - lint, typecheck and build are clean
+  - 169 offline tests pass (new: credit balance, 401 retry for reads including the POST email search, no retry for writes)
+  - 21/21 live tests pass
+  - 22/22 spike checks pass
+
+## M5 results (26 Sep, verified live in graph8)
+- **Draft a follow-up campaign for one group of a saved run** (`lib/pipeline/draftCampaign.ts`, `npm run draft`). It runs on demand only, because Studio's document generation spends credits. **Nothing is sent or launched.**
+  1. **Audience:** the group's eligible contacts. For **referrals, the named people** are looked up in the CRM with a free search: exact full-name match at the same company, and ambiguous matches are skipped. The person who left is never targeted. Roles ("their team leaders") and bare emails are reported, not guessed.
+  2. **Re-check right before adding anyone:** hard stops (a no in any thread) and suppression are verified again. It fails closed, and there's a minimum audience (`MIN_GROUP_SIZE`).
+  3. **List:** `POST /lists` with an idempotency key, then add contacts. On a 409 conflict it retries with `skip_all`: warned contacts are left out, never forced in.
+  4. **Campaign:** `POST /campaigns` with `auto_generate_documents`. Name, category and field lengths follow the API limits. The hook, concept, goal and persona come from `gpt-6-sol`, with a deterministic fallback. **The brief is assembled by code from grounded data**: verbatim quotes (deduped), verified proof with sources, the proof gap as a "do NOT claim" rule, themes, referral note, timing advice.
+  5. **Documents:** it waits until Studio finishes each one. Observed statuses are `generating`, `completed` and `failed`, and both completed and failed count as finished. Then:
+     - completed Messaging & Objections / Reply Templates get the Answer Card appended
+     - documents **Studio failed to generate** get ReplyIQ's grounded section written into them, including a failed Campaign Brief
+     - documents still generating are left alone and reported; `--patch-only` patches them later
+     - sections carry a marker so re-runs never duplicate; `--refresh-docs` replaces only ReplyIQ's own section
+  6. Every stage is saved on the run. Re-runs reuse the list and campaign (saved IDs plus idempotency keys); `--force` makes a new campaign.
+- **graph8 finding:** for new campaigns in this org, **Studio's generator marks 7 of 9 documents `failed`**: brief, messaging & objections, targeting, email prompt, emails, reply templates, snippets. It still charges credits for them (8,997 available; the company profile is set). This is graph8-side; ReplyIQ fills the documents it owns so the drafts stay useful.
+- **Live acceptance:**
+  - `[DEMO]` pricing request: list 2 (the right 2 contacts) and campaign `affb690d…`. Messaging & Objections now holds the Answer Card with 4 verified proof points and the proof gap; Reply Templates and the brief are filled too. Read back from graph8.
+  - SMB out of office: list 3 (9 contacts) and campaign `a1d334db…`, with timing advice listing every return date.
+  - SMB referral: **stopped before any write.** None of the 6 named people are in the CRM (an enrichment lookup would cost credits and needs approval); the 2 replies that didn't name a person are reported.
+- **Tests:**
+  - 164 offline: happy path; failed, generating and completed documents; patch-only reuse; no duplicates; hard-stop and suppression re-check; minimum audience with no writes; refusals and unsafe writes; referral targeting; 409 `skip_all`; idempotency keys; section upsert and refresh; brief grounding; field fallback and limits
+  - 21 live, including a read-only check of every recorded draft against graph8 (campaign exists, list attached with the audience, no hard-stop contact in the list, documents carry ReplyIQ's section)
+
+## M4 results (26 Sep, verified live)
+- **Answer Cards** (`lib/pipeline/cards.ts`, `gpt-6-sol`): one per objection or interest group (interested, pricing, price objection, not now, competitor, no need). Hard stops never get a card. Each card has:
+  - summary and verbatim quotes
+  - **proof we have** (each item names its source document)
+  - **proof gap**
+  - how to answer and email angle
+  - a note for each theme
+- **Retrieval, nothing hardcoded** (`lib/pipeline/retrieve.ts`): all Studio Global docs plus the campaign's own docs (Messaging & Objections, Reply Templates, …) are split at headings and paragraphs and ranked against the group's replies, reasons and themes with a small TF-IDF, within a 40k-character budget and at most 5 passages per doc. Proof-like and campaign docs get a mild boost, and the opening of the Proof Catalog is always included (it states what proof exists and what doesn't).
+- **Grounding:**
+  - every proof point must quote its document verbatim (at least 6 words); the code checks the excerpt against the **full document**, ignoring markdown formatting (`normLoose`)
+  - wrong or unknown doc IDs and invented excerpts go to `unverifiedClaims` and into the proof gap
+  - quotes must be verbatim from the group's replies, otherwise the classifier's verified quotes are used
+  - a card with no verified proof must state a gap
+  - a failed card is a warning; the run continues
+- **Live results:**
+  - `[DEMO]` pricing card: 4 verified proof points (Team Plan $99 unlimited users, 10k credits, $0.05 overage, free entry tier, custom enterprise). Gap: no credit-consumption breakdown or cost estimator.
+  - Price objection (per-seat vs contract lock-in): 4 verified ("no seat fees, ever", month-to-month, free search in parallel with an existing contract). Gap: no case study quantifying cost for a 40-person team.
+  - Competitor (ZoomInfo / Outreach / Apollo): 3 verified. Gap: no win/loss or displacement stories.
+  - **0 claims dropped** as unverified in these runs, about 10k tokens per card.
+- **The SMB campaign has no objection groups** (only referral, out of office, meeting booked, hard no, needs review), so its cards step is `skipped`. The richer replies the team will seed will produce cards with no code change.
+- **Tests:**
+  - 149 offline: retrieval ranking, budget and cap, passages verbatim; card grounding including markdown, invented excerpts, wrong or unknown docs, short or duplicate excerpts, forced gap, quote fallback, theme notes; only objection groups get cards; failures non-fatal; no documents
+  - 20 live: price and competitor cards on real Studio docs, every excerpt re-verified independently, 3 out of 3
+
+## M3 results (26 Sep, verified live and in graph8's UI)
+- **Tagging** (`lib/pipeline/tagThreads.ts`): each reply gets its category tag in graph8 (`ReplyIQ · Referral`, …).
+  - Only the categories present are created. Existing tags are reused by name; the create response has no ID, so the list is re-read.
+  - Tagging is idempotent on graph8's side (verified), and threads that already carry the tag are skipped.
+  - Tags are created with `ai_can_apply: false`, so graph8's auto-tagger never applies them.
+  - Per-thread failures are recorded and never stop the others.
+  - Writes check the write policy first.
+  - The pipeline only tags when asked (`writeTags`). The CLI tags by default; `--no-tag` makes it read-only.
+- **graph8 limitation found:** `/inbox/channels/*` (the only tag-removal endpoint) returns 404 for these threads; it can't see them. If a re-run moves a reply to another category, the old ReplyIQ tag is kept and reported (`staleKept`); removal is attempted in case it works on real threads. The probe tag was renamed into the real "ReplyIQ · Out of office" tag on the matching demo thread, so nothing was deleted.
+- **Audience** (`lib/pipeline/resolveContacts.ts`) fails closed. Precedence:
+  1. hard no / unsubscribe in this thread
+  2. **hard stop elsewhere** (the same contact, by ID or email, said no in any thread of the run)
+  3. not found
+  4. **suppression unknown** (the check failed, so never contact)
+  5. suppressed (on any channel)
+  6. no follow-up category (meeting booked, meeting request, needs review)
+  
+  Everyone else is eligible, deduped per group. Suppression is checked once per contact.
+- **Acceptance run on the graph8 Tech SMB Sales campaign:** 19 of 19 threads tagged (0 failed); created "Meeting booked" and "Referral". Audience: 16 eligible, excluded hard no 1 and no-follow-up 2.
+- **Verified in graph8's own Inbox:** all 9 ReplyIQ tags appear in the tag filter, and filtering by "ReplyIQ · Referral" shows exactly the 7 SMB referral threads, each with the badge.
+- **Inbox Analytics stays at 0 replies.** It doesn't count the seeded threads at all, tagged or not; its event rollup is unavailable (`rollup_available: false` in campaign metrics). **The demo beat uses the Inbox tag filter instead.**
+- **Classifier definitions sharpened** after live flakes:
+  - out of office = any away notice, return date optional (a bare "Out of office" was sometimes "other")
+  - a dead-address notice listing only generic support or sales inboxes is "needs review", not a referral
+  
+  The SMB campaign is identical across 4 runs; the classifier live tests pass 4 out of 4.
+- **Referral note for M5:** referral contacts are eligible, but the follow-up should go to the **named person** (`referredName`, looked up on approval), not to the person who left.
+- **Tests:** 130 offline (tagging, resolve rules including hard-stop-everywhere and fail-closed suppression, pipeline with and without writes) and 19 live, including a **write test** on the synthetic `[DEMO]` sequence: tag it, read every thread back from graph8, then re-run to prove idempotency.
+
+## Themes inside groups (26 Sep)
+- **The 13 categories still decide every action.** A new **themes** step (`lib/pipeline/themes.ts`, `gpt-6-sol`) finds the finer patterns inside each group with 2 or more replies. The AI names them itself; nothing is hardcoded. Example: "per-seat cost too high" vs "locked into an annual contract" inside a price objection.
+- **Grounded and non-critical:**
+  - every reply of a group is in exactly one theme; anything the model skipped goes into "Other"
+  - unknown or duplicate IDs are ignored, empty themes dropped, at most 5 themes (the smallest are merged)
+  - each theme's quote must be verbatim in one of **its own** members; otherwise a member's text is used and marked `quoteVerified: false`
+  - items use short aliases
+  - a failed call leaves that group without themes and adds a warning; the run never fails because of themes
+  - each reply gets a `themeId`; groups get `themes[]`; the run has a `themes` step
+- **Live on the graph8 Tech SMB Sales campaign:**
+  - Referral (7): named replacement 3, manager or team leader 2, email address only 1, already auto-forwarded 1
+  - Out of office (9): gave a backup contact for urgent needs 4, still reachable 3, new-business contact 1, office back Monday 1
+  
+  The "backup contact" theme is directly actionable: those people can be reached now instead of after the return date.
+- **Tests:** 109 offline (validation edge cases, pipeline with a failing or skipped themes step) and 18 live (a synthetic price-objection group must keep per-seat and contract lock-in replies in separate themes, with verbatim quotes, 3 out of 3 runs; plus theme rules checked on every real source).
+
+
+- **The classifier sees the entire conversation.** Every message, oldest first, with quoted history stripped. There's no message-count or per-message limit. This fixed a real loss: the 9-message SPARXiQ thread used to drop our original pitch.
+- **Threads over 12,000 characters go through a composer** (`lib/pipeline/compose.ts`):
+  - An LLM pass reads the whole thread, in 60k-character chunks if huge, and writes a digest of every intent-relevant event. Each event carries a verbatim quote.
+  - The code keeps only events whose quote is really in the thread (at least 3 words), and drops an unsupported "current state".
+  - The classifier then gets our first message verbatim + the verified digest + the latest messages verbatim, within 12k characters.
+  - If nothing verifies, it falls back to the first message + the newest messages, and adds a warning.
+  - Each reply records `context: full | composed | truncated`.
+- **Batches are packed by count (20) and total size (120k characters).**
+- **Fix: labels crossed between threads.** With longer contexts the model once swapped labels between three similar threads. The quote check caught it (all three were flagged for review), and now:
+  - items use short per-batch aliases (R1, R2…) instead of look-alike UUIDs, with the company named and the latest reply first
+  - a label whose quote belongs to another reply in the batch is treated as a swap, and those replies are re-classified one at a time
+- **Fix: unstable borderline labels.** Tightened definitions:
+  - referral = points to *anyone* (a name, a role like "their team leaders", or an address)
+  - out of office = the person or the *office* is away
+  - needs review = points to no one
+  
+  The SMB campaign is now identical across 3 runs (0 of 19 differ): meeting booked 1, referral 7, out of office 9, hard no 1, needs review 1.
+- **Tests:** 95 offline and 17 live, including:
+  - a live composer test with deciding events buried mid-thread (a booked meeting; an unsubscribe with the latest reply just "Ok, thanks.")
+  - a live consistency test (two runs must agree on at least 90%, and hard stops can never flip)
+
+
+- **What it does:** load the source (discovered at runtime) → fetch its replies → classify each into one of 13 categories → group them. It writes nothing to graph8.
+- **Classifier** (`lib/pipeline/classify.ts`, `gpt-6-luna` via `lib/llm.ts`):
+  - It reads the whole conversation plus graph8's summary, not just the last message.
+  - It extracts `referredName` (the person to contact instead) and `revisitHint` (a return date).
+  - Built so it can't silently break:
+    - strict JSON schema, re-validated with zod
+    - exactly one label per reply (missing ones are retried alone, then fall back to "needs review")
+    - unknown or duplicate IDs are ignored
+    - quotes must be verbatim (ignoring case, quote marks, dashes, broken `U+FFFD` characters), otherwise the confidence is capped at 0.5 and the reply is flagged for review
+    - placeholder or empty replies never reach the model
+    - phone numbers are stripped before sending
+    - a model failure fails the step instead of leaving partial labels
+- **Run state** (`lib/store.ts`): one JSON file per run in `data/runs/` (gitignored). Writes are atomic, the IDs are validated so no path can escape the folder, and corrupt files are skipped. The runner (`lib/pipeline/runPipeline.ts`) saves after every step and never throws; failures are recorded on the step.
+- **Live result on the graph8 Tech SMB Sales campaign** (19 replies, 1 LLM call, about 8k in / 2.4k out tokens, 0 need review):
+
+  | Group | Count | Notes |
+  |---|---|---|
+  | Meeting booked | 1 | caught from the thread even though the last message is a time correction |
+  | Referral | 6 | named people extracted (Kurt Huegin, Jeff Evans, Rob Moore, Claudia Boehringer, Steve Pinchotti…) |
+  | Out of office | 8–9 | return dates extracted |
+  | Hard no | 1 | |
+  | Needs review | 2 | dead address, generic auto-reply |
+
+  The `[DEMO]` sequence gives: meeting request 1, interested 2, pricing 2, OOO 1, hard no 2, unsubscribe 2.
+- **Tests:**
+  - **77 offline:** taxonomy rules, every classifier edge case, the store, and pipeline integration with a fake org and fake LLM (success, graph8 failure, LLM failure, empty source, zero replies, `--limit`, warnings, and the step progression a polling UI sees).
+  - **15 live:** 10 hand-written hard cases (booked-meeting thread, referral with name, OOO with date, unsubscribe, competitor, price objection, timing, pricing, hard no, bounce), the 6 demo reply types, and end to end on every discovered source, checking general rules plus "no writes". Stable across 3 consecutive runs (45/45).
+
+## M1 results (26 Sep, verified live)
+- **The graph8 client is built on the SDK's `request()`.** It accepts `{method, body, headers, query, idempotencyKey, maxRetries}`; retries 429/5xx/network, honouring `Retry-After`; and adds an `Idempotency-Key` on writes. Checked in the installed SDK source.
+- **There's no sandbox environment for this key.** `/sandbox/status` returns **404** ("only in the developer sandbox environment"). The key acts on production, org `org_87325c23062e` (role admin), which holds the seeded hackathon data. The team confirmed this org is the hackathon sandbox, so it's allowlisted in `replyiq/lib/config.ts`. **Writes still fail closed for any other org**: they're allowed only if sandbox status is true, or if the key's org (from `GET /roles/me/permissions`) is in that allowlist (plus optional `G8_WRITE_ORG_ID`).
+- **How replies are read:** `GET /inbox?sequence_id=` misses the seeded `[DEMO]` threads. **`POST /inbox/emails/search`** (a search that changes nothing) returns them, with the thread id, **contact id**, `campaign_id` (= sequence id), tags and summary. Mailboxes come from `GET /inbox/mailboxes/all`.
+  - **It must be called one mailbox at a time.** Passing two mailboxes returned 0 of the 10 demo threads.
+  - The client uses both readers and merges them by thread id.
+- **Data found:** 6 sequences (4 not shown in the Sequencer UI), 40 replies across 4 sequences, all with contact ids:
+  - `[DEMO] Product introduction history`: 10
+  - `[DEMO] Follow-up outcome history`: 2
+  - `[Full copy] Kill Your Tool Stack v2`: 19 anonymised real replies (mostly OOO, "left the company, contact X", "not interested")
+  - `[Hackathon copy] … v2`: 9 placeholders ("Original private reply omitted")
+- **The real data is the graph8 team's SMB campaign** (`[Full copy] Kill Your Tool Stack — Tech SMB Sales v2`, mailbox `campaign-saad@example.com`, workspace "Graph8 Tech SMB Sales — full campaign"): 7,111 contacts, 2,136 sent, 19 replies. One reply is an 8-message thread that ends in a **booked meeting**, so each `Reply` now carries `conversation` (the last 8 messages) and graph8's `summary`, and `Category` gained `meeting_booked`. No graph8 Workflows exist yet (`GET /workflows` returns 0).
+- **Sources are discovered, never hardcoded** (`lib/pipeline/sources.ts`):
+  - `discoverSources()` makes one inbox pass per mailbox and counts replies for every sequence, linking each to its Studio campaign.
+  - `resolveSource({campaignId} | {sequenceId})` returns the campaign, its sequences, audience list, sender mailboxes and campaign docs (matched by `file_type`, then by name).
+  - `pickDefaultSource()` chooses the source with the most replies.
+  - The spike takes `--campaign <id>` or `--sequence <id>`.
+- **Other checks:**
+  - 14 inbox tags already exist (Interested, Not Interested, Out of Office, Referred Colleague, Time Objection…)
+  - 17/17 contacts resolved, none suppressed
+  - all 6 key Studio docs are present (Proof Catalog 20k chars, Pricing Matrix 26k…)
+  - 2 mailboxes, 0 active
+- **Privacy:** the live samples contain real phone numbers and the owner's email, so they're kept in the gitignored `tests/fixtures/live/`. Only the scrubbed `[DEMO]` sample in `tests/fixtures/demo/` is committed.
+- **Tests:** 27 unit tests covering retries, 4xx/5xx handling, pagination, the write policy (including "a refused write never hits the network"), per-mailbox search and merge, normalisers, text cleanup, scrubbing and the real demo threads. `npm run spike` passes 20/20.
+
 ## 1. Scope of the first build
 
 **In scope:**
@@ -227,13 +483,21 @@ Behaviour, matching what the docs say the SDK does:
 - Any suppressed contact is also excluded, whatever its category.
 - A group gets a draft campaign only if it's a follow-up category and has at least `MIN_GROUP_SIZE` eligible contacts.
 
-**Expected groups on today's seeded data** (sequence `90bda420`, 10 threads):
+**Expected groups on the demo campaign** (graph8 Tech SMB Sales, picked at runtime; 19 replies today; see REPLYIQ-PLAN §0b):
+- out of office: ~8 (keep the return date in `revisitHint`)
+- referral / wrong person: ~5–6 (keep the named person in `referredName`)
+- left the company, no referral: 1–2 (`other`, no follow-up)
+- hard no: 1
+- meeting booked: 1 (never followed up)
+- auto-reply / invalid address: 2 (`other`)
+
+**Test set for the objection categories** (synthetic `[DEMO]` sequence `90bda420`, committed in `tests/fixtures/demo/`):
 - interested/meeting: 4
 - pricing request: 2
 - hard no: 2
 - unsubscribe: 2
 
-The pricing group is the main Answer Card demo.
+Classification must use `Reply.conversation`, not just `replyText`. In the SMB meeting thread, the last prospect message reads like a complaint ("the time I picked wasn't 9 am").
 
 ---
 

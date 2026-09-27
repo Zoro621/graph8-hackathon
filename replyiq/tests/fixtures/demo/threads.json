@@ -1,0 +1,550 @@
+{
+  "96118ffd-cde3-5a7c-b57a-3ea8a0a02296": [
+    {
+      "id": "e891cb33-6af1-5290-83f5-a413cf98354d",
+      "subject": "[DEMO] Can we schedule a fictional follow-up next week?",
+      "sequenceId": "96118ffd-cde3-5a7c-b57a-3ea8a0a02296",
+      "sequenceName": "[DEMO] MapleMetrics Trial Activation",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092011,
+        "email": "prospect-12@example.com",
+        "name": "Demo Contact 12",
+        "company": "Fictional Company 3"
+      },
+      "messages": [
+        {
+          "messageId": "81168102-1428-5095-8905-0d929d9fcb99",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-12@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T23:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "c79dd45c-62ad-5379-af8a-0bba6a5d7e4d",
+          "from": "prospect-12@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+          "responder": "OTHER",
+          "date": "2026-09-25T00:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+          "name": "ReplyIQ · Meeting request"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
+      "source": "emails.search"
+    },
+    {
+      "id": "b4350be9-0d67-55fc-8988-7756d98acc2c",
+      "subject": "[DEMO] Out of office in this training scenario.",
+      "sequenceId": "96118ffd-cde3-5a7c-b57a-3ea8a0a02296",
+      "sequenceName": "[DEMO] MapleMetrics Trial Activation",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092010,
+        "email": "prospect-11@example.com",
+        "name": "Demo Contact 11",
+        "company": "Fictional Company 3"
+      },
+      "messages": [
+        {
+          "messageId": "28f6c62a-476f-5bcb-bab1-ae78898c4ca7",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-11@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T22:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "b0ddfbaf-bd97-5c69-b91a-d6da189e1221",
+          "from": "prospect-11@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Out of office in this training scenario.",
+          "responder": "OTHER",
+          "date": "2026-09-24T23:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+          "name": "ReplyIQ · Out of office"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Out of office in this training scenario.",
+      "source": "emails.search"
+    }
+  ],
+  "90bda420-78bc-5634-9da0-51e4f46bdc4a": [
+    {
+      "id": "9c4c95de-d22c-5b6d-bead-cf68e8e001c8",
+      "subject": "[DEMO] Please send fictional pricing details for the exercise.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092001,
+        "email": "prospect-02@example.com",
+        "name": "Demo Contact 02",
+        "company": "Fictional Company 1"
+      },
+      "messages": [
+        {
+          "messageId": "2bc6552c-a161-5080-9668-410a300c9e2e",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-02@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T13:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "a3660f25-fc94-5214-94d8-5a1bd719b6ed",
+          "from": "prospect-02@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+          "responder": "OTHER",
+          "date": "2026-09-24T14:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+          "name": "ReplyIQ · Pricing request"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
+      "source": "emails.search"
+    },
+    {
+      "id": "ddbbc087-de64-549e-9cc3-21c8f2774f4c",
+      "subject": "[DEMO] Please remove this fictional contact from the sample list.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092003,
+        "email": "prospect-04@example.com",
+        "name": "Demo Contact 04",
+        "company": "Fictional Company 1"
+      },
+      "messages": [
+        {
+          "messageId": "c7229c2c-7c6a-5d8f-9df3-8be3b7bfd5c2",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-04@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T15:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "5e867fde-1cd1-5a26-8bf3-a4b87935b549",
+          "from": "prospect-04@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+          "responder": "OTHER",
+          "date": "2026-09-24T16:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+          "name": "ReplyIQ · Unsubscribe"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
+      "source": "emails.search"
+    },
+    {
+      "id": "64336ae0-8a2c-577b-a4ee-9ce8084c6286",
+      "subject": "[DEMO] Please remove this fictional contact from the sample list.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092009,
+        "email": "prospect-10@example.com",
+        "name": "Demo Contact 10",
+        "company": "Fictional Company 3"
+      },
+      "messages": [
+        {
+          "messageId": "679aa64a-097e-5d45-af4c-aa15e8767424",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-10@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T21:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "c77059cf-004f-5280-881e-02b10530f0c4",
+          "from": "prospect-10@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Please remove this fictional contact from the sample list.",
+          "responder": "OTHER",
+          "date": "2026-09-24T22:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "ac37063b-1af1-4a39-aeed-499fe37b0aba",
+          "name": "ReplyIQ · Unsubscribe"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Please remove this fictional contact from the sample list.",
+      "source": "emails.search"
+    },
+    {
+      "id": "129e7abf-bac3-5ce9-9b75-f65ad3db1c4d",
+      "subject": "[DEMO] Please send fictional pricing details for the exercise.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092007,
+        "email": "prospect-08@example.com",
+        "name": "Demo Contact 08",
+        "company": "Fictional Company 2"
+      },
+      "messages": [
+        {
+          "messageId": "eaa794f9-25c5-5eb4-9d8f-9c9118895445",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-08@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T19:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "819d79ce-f6cb-5d11-b0bc-3466f409f80e",
+          "from": "prospect-08@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Please send fictional pricing details for the exercise.",
+          "responder": "OTHER",
+          "date": "2026-09-24T20:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "5e704b33-aa44-49fb-a705-471acb6f7081",
+          "name": "ReplyIQ · Pricing request"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Please send fictional pricing details for the exercise.",
+      "source": "emails.search"
+    },
+    {
+      "id": "4e0c9d09-1a85-5e67-94e6-38c28a64a39a",
+      "subject": "[DEMO] Can we schedule a fictional follow-up next week?",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092005,
+        "email": "prospect-06@example.com",
+        "name": "Demo Contact 06",
+        "company": "Fictional Company 2"
+      },
+      "messages": [
+        {
+          "messageId": "2521fd3f-82ac-5abd-ac96-27cd1b00ccde",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-06@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T17:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "483b502d-6be7-5465-b32e-911d40a51a2f",
+          "from": "prospect-06@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Can we schedule a fictional follow-up next week?",
+          "responder": "OTHER",
+          "date": "2026-09-24T18:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "2ac25a19-53fa-462c-accc-5219f7d04329",
+          "name": "ReplyIQ · Meeting request"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Can we schedule a fictional follow-up next week?",
+      "source": "emails.search"
+    },
+    {
+      "id": "93b93da0-6222-5ebc-a39e-a4e19a61af1c",
+      "subject": "[DEMO] Interested in a demo. Could you share the sample agenda?",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092006,
+        "email": "prospect-07@example.com",
+        "name": "Demo Contact 07",
+        "company": "Fictional Company 2"
+      },
+      "messages": [
+        {
+          "messageId": "1e067f80-dbbe-58ee-af8f-58297ded8f2c",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-07@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T18:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "62de6b1b-6e08-580c-bac5-c27333f9b61a",
+          "from": "prospect-07@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+          "responder": "OTHER",
+          "date": "2026-09-24T19:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+          "name": "ReplyIQ · Interested, no meeting"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
+      "source": "emails.search"
+    },
+    {
+      "id": "e94cf4c2-b87b-5439-ad96-111d20a53b5d",
+      "subject": "[DEMO] Out of office in this training scenario.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092004,
+        "email": "prospect-05@example.com",
+        "name": "Demo Contact 05",
+        "company": "Fictional Company 2"
+      },
+      "messages": [
+        {
+          "messageId": "52bcdf19-bc1f-5fbf-9f94-7be5552f3288",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-05@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T16:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "0e41db45-097a-50e3-95a5-e1e6e6787ba5",
+          "from": "prospect-05@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Out of office in this training scenario.",
+          "responder": "OTHER",
+          "date": "2026-09-24T17:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "610d6f1a-e0ea-49da-ab55-aa1327530523",
+          "name": "ReplyIQ · Out of office"
+        },
+        {
+          "id": "2e92f4d1-8b58-4e1c-b8da-4ff7c1a16b29",
+          "name": "ReplyIQ · Needs review"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Out of office in this training scenario.",
+      "source": "emails.search"
+    },
+    {
+      "id": "5f2b9586-63c3-55ea-b693-ff36d420df63",
+      "subject": "[DEMO] Not interested at this time.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092008,
+        "email": "prospect-09@example.com",
+        "name": "Demo Contact 09",
+        "company": "Fictional Company 3"
+      },
+      "messages": [
+        {
+          "messageId": "d5cc2d8f-04d6-589c-9f66-f334fde903b9",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-09@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T20:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "1a088ce4-623e-52fd-bcb8-f2b073e98f25",
+          "from": "prospect-09@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Not interested at this time.",
+          "responder": "OTHER",
+          "date": "2026-09-24T21:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+          "name": "ReplyIQ · Hard no"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Not interested at this time.",
+      "source": "emails.search"
+    },
+    {
+      "id": "fbf2b049-4546-5b89-a82e-5e15a4124f71",
+      "subject": "[DEMO] Not interested at this time.",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092002,
+        "email": "prospect-03@example.com",
+        "name": "Demo Contact 03",
+        "company": "Fictional Company 1"
+      },
+      "messages": [
+        {
+          "messageId": "48f71718-a66d-5ce7-8c57-02a41042ba09",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-03@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T14:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "1bcfd6f3-9677-58fa-9880-7a2af07f9959",
+          "from": "prospect-03@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Not interested at this time.",
+          "responder": "OTHER",
+          "date": "2026-09-24T15:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "46853c8d-013c-4ba0-bac6-c3a89379d66b",
+          "name": "ReplyIQ · Hard no"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Not interested at this time.",
+      "source": "emails.search"
+    },
+    {
+      "id": "80528b43-a831-5cb2-ba30-3ee1c463999c",
+      "subject": "[DEMO] Interested in a demo. Could you share the sample agenda?",
+      "sequenceId": "90bda420-78bc-5634-9da0-51e4f46bdc4a",
+      "sequenceName": "[DEMO] OrbitDesk Demo Requests",
+      "mailbox": "hackathon-saad@example.com",
+      "contact": {
+        "id": 880026092000,
+        "email": "prospect-01@example.com",
+        "name": "Demo Contact 01",
+        "company": "Fictional Company 1"
+      },
+      "messages": [
+        {
+          "messageId": "a7e13156-20c0-5308-8205-6a147d9759ef",
+          "from": "hackathon-saad@example.com",
+          "to": [
+            "prospect-01@example.com"
+          ],
+          "content": "[SYNTHETIC] Hello Demo Contact, would you like to review our fictional workflow example?",
+          "responder": "USER",
+          "date": "2026-09-24T12:05:34.331032+00:00",
+          "isDraft": false
+        },
+        {
+          "messageId": "df829ef1-d6bc-5dd1-a97e-fdd7044c51c7",
+          "from": "prospect-01@example.com",
+          "to": [
+            "hackathon-saad@example.com"
+          ],
+          "content": "[SYNTHETIC] Interested in a demo. Could you share the sample agenda?",
+          "responder": "OTHER",
+          "date": "2026-09-24T13:05:34.331032+00:00",
+          "isDraft": false
+        }
+      ],
+      "tags": [
+        {
+          "id": "5be37815-6f0d-4f6a-88d3-d922adafa971",
+          "name": "ReplyIQ · Interested, no meeting"
+        }
+      ],
+      "summary": "Synthetic practice conversation: Interested in a demo. Could you share the sample agenda?",
+      "source": "emails.search"
+    }
+  ]
+}
