@@ -17,18 +17,24 @@
 // The sequence is created with NO sender attached and is never run here: a person connects a mailbox and
 // launches it. Optional previews: graph8's AI drafts step 1 for a few contacts now (spends credits; nothing
 // is saved or sent) and ReplyIQ checks each one for the approval screen.
+//
+// Out of office: the group is split by return date (returnDates.ts). The draft's own list and sequence carry
+// the first wave; each later date gets its own list and sequence with the same steps, except that step 1
+// waits until the working day after those people are back. Recounting the waits needs no model.
 import { z } from "zod";
 import type { EmailDraftBody, G8Client, SequenceCreateBody, SequenceStepConfig } from "../g8";
 import { describeError, docText } from "../g8";
 import type { Llm } from "../llm";
 import { categoryInfo } from "../taxonomy";
 import { norm, normLoose, withoutOwnSections, wordCount } from "../text";
-import type { CampaignDraft, EmailCheck, EmailFact, Group, Run, SequenceDraft } from "../types";
+import type { CampaignDraft, EmailCheck, EmailFact, Group, ReturnWave, Run, SequenceDraft, SequenceWave } from "../types";
 import { buildQuery } from "./cards";
 import { toPlainText } from "./fetchReplies";
+import { dayLabel, isoDay, planReturnWaves, timedByReturnDate, waveTag } from "./returnDates";
 import { retrieve, type SourceDoc } from "./retrieve";
 
 export const STEP2_DELAY_DAYS = 4;
+const DAY_S = 86_400;
 const STEP1_POSITION = "Step 1: the first email after the prospect replied to the original campaign; it follows up on their reply.";
 const STEP2_POSITION = `Step 2: sent ${STEP2_DELAY_DAYS} days after step 1 (which followed up on their reply) if they have not answered.`;
 export const MERGE_TAGS = ["first_name", "last_name", "company", "title", "sender_name"] as const;
@@ -350,6 +356,11 @@ export type SequenceClient = Pick<
   | "findContactByEmail"
   | "estimateEmailDraft"
   | "generateEmailDraft"
+  | "updateSequence"
+  | "createList"
+  | "addContactsToList"
+  | "listContactsOfList"
+  | "removeContactsFromList"
 >;
 
 export interface SequenceDeps {
@@ -367,6 +378,7 @@ export interface SequenceOptions {
   previews?: number; // graph8 drafts of step 1 for up to N contacts (spends credits); 0 = none
   rebuild?: boolean; // create a new sequence even if one exists
   refresh?: boolean; // re-write the existing draft sequence's steps in place (e.g. after the card changed)
+  retime?: boolean; // out of office: split by return date again and recount step 1's waits from today (no model)
 }
 
 async function loadDocs(g8: SequenceClient, run: Run, warnings: string[]) {
@@ -547,7 +559,17 @@ export const neverList = (seq: Pick<SequenceDraft, "doNotClaim" | "proofGap">): 
   ...(seq.proofGap ? [`Anything that would fill this proof gap (the company has no proof for it): ${seq.proofGap}`] : []),
 ];
 
-const step1Config = (seq: SequenceDraft): SequenceStepConfig => ({ step_order: 1, step_type: "EMAIL", input_type: "ON_DEMAND", time_interval: 0, step_data: { instructions: seq.instructions, email_type: "html" } });
+const step1Config = (seq: SequenceDraft, waitDays = 0): SequenceStepConfig => ({
+  step_order: 1,
+  step_type: "EMAIL",
+  input_type: "ON_DEMAND",
+  time_interval: waitDays * DAY_S,
+  step_data: { instructions: seq.instructions, email_type: "html" },
+});
+/** The same steps, with step 1 waiting `days` after launch (a return-date wave). */
+const withWait = (configs: SequenceStepConfig[], days: number) => configs.map((c) => (c.step_order === 1 ? { ...c, time_interval: days * DAY_S } : c));
+const inDays = (seconds: number) => `${Math.round((seconds / DAY_S) * 10) / 10} day(s)`;
+const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
 const step2Config = (m: { subject: string; body: string }): SequenceStepConfig => ({
   step_order: 2,
   step_type: "EMAIL",
@@ -570,8 +592,187 @@ async function readBack(g8: SequenceClient, id: string, listId: number, expected
   if (got.length !== expected.length) problems.push(`${got.length} step(s), expected ${expected.length}`);
   if (String(got[0]?.input_type).toUpperCase() !== "ON_DEMAND") problems.push("step 1 is not written on demand");
   if (norm(got[0]?.step_data?.instructions ?? "") !== norm(expected[0].step_data.instructions ?? "")) problems.push("step 1 instructions differ from what was sent");
+  if (Number(got[0]?.time_interval ?? 0) !== expected[0].time_interval) problems.push(`step 1 waits ${inDays(Number(got[0]?.time_interval ?? 0))} in graph8, expected ${inDays(expected[0].time_interval)}`);
   if (expected[1] && norm(got[1]?.step_data?.subject ?? "") !== norm(expected[1].step_data.subject ?? "")) problems.push("step 2 subject differs from what was sent");
   return problems;
+}
+
+/** Keep a list's members exactly `wanted`: the others are removed, the missing added (contacts graph8 flags are skipped, never forced in). */
+export async function syncList(g8: Pick<G8Client, "listContactsOfList" | "removeContactsFromList" | "addContactsToList">, listId: number, wanted: number[]) {
+  const members = new Set((await g8.listContactsOfList(listId)).map((m) => m.id).filter((x): x is number => typeof x === "number"));
+  const want = new Set(wanted);
+  const remove = [...members].filter((id) => !want.has(id));
+  const add = [...want].filter((id) => !members.has(id));
+  if (remove.length) await g8.removeContactsFromList(listId, remove);
+  const conflictSkipped = add.length ? (await g8.addContactsToList(listId, add)).conflictSkipped : false;
+  return { added: add.length, removed: remove.length, conflictSkipped };
+}
+export const CONFLICT_NOTE = "graph8 flagged some contacts (e.g. already in other outreach); they were skipped, not forced in";
+
+/** Write `configs` over a draft sequence's steps, in place (never a second sequence). */
+async function writeSteps(g8: SequenceClient, id: string, configs: SequenceStepConfig[]) {
+  const stored = sortedSteps((await g8.getSequenceSteps(id)).steps);
+  for (const c of configs) {
+    const s = stored.find((x) => Number(x.step_order) === c.step_order);
+    // step_data is replaced wholesale by graph8, so the complete object is always sent.
+    if (s?.id) await g8.updateSequenceStep(id, String(s.id), { input_type: c.input_type, time_interval: c.time_interval, step_data: c.step_data });
+    else await g8.addSequenceSteps(id, [c]);
+  }
+}
+
+/** A draft sequence's steps as graph8 holds them: what every wave repeats when only the waits are recounted. */
+async function storedConfigs(g8: SequenceClient, id: string): Promise<SequenceStepConfig[]> {
+  const steps = sortedSteps((await g8.getSequenceSteps(id)).steps);
+  if (!steps.length) throw new Error("the follow-up sequence has no steps in graph8");
+  return steps.map((s) => ({
+    step_order: Number(s.step_order),
+    step_type: "EMAIL",
+    input_type: String(s.input_type).toUpperCase() === "MANUAL_TEMPLATE" ? "MANUAL_TEMPLATE" : "ON_DEMAND",
+    time_interval: Number(s.time_interval ?? 0),
+    step_data: { ...(s.step_data ?? {}), email_type: "html" },
+  }));
+}
+
+const describeSequence = (run: Run, group: Group, extra = "") =>
+  clip(
+    `ReplyIQ follow-up for "${group.label}" (run ${run.id}).${extra} Step 1: graph8's AI writes each email from ReplyIQ's grounded instructions. Step 2: ReplyIQ's fact-checked text. No sender attached; a person launches it.`,
+    500,
+  );
+
+const sequenceBody = (run: Run, group: Group, draft: CampaignDraft, owner: string, name: string, description: string, listId: number, steps: SequenceStepConfig[]): SequenceCreateBody => ({
+  name,
+  description,
+  user_email: owner,
+  finish_on_reply: true,
+  send_in_same_thread: true,
+  wait_for_new_contacts: false,
+  associated_list_id: listId,
+  ...(draft.campaignId ? { campaign_id: draft.campaignId } : {}),
+  steps,
+});
+
+async function sequenceOwner(deps: SequenceDeps, run: Run, seq: SequenceDraft): Promise<string> {
+  let owner = seq.ownerEmail ?? deps.ownerEmail;
+  if (!owner && run.source.sequences[0]) owner = (await deps.g8.getSequence(run.source.sequences[0].id)).user_email ?? undefined;
+  if (!owner) throw new Error("no sequence owner email: set G8_SEQUENCE_OWNER_EMAIL");
+  return owner;
+}
+
+/**
+ * Out of office: put each return-date wave in graph8, waits counted from `today`. Slot 0 is the draft's own list
+ * and sequence (already written with `base` unless `patchPrimary`); each later date gets a list and a sequence,
+ * reusing an earlier split's spare ones before making new ones. A slot no one is left in has its list emptied,
+ * so it can't send. Every sequence is renamed for its date and read back.
+ */
+async function applyWaves(deps: SequenceDeps, run: Run, group: Group, draft: CampaignDraft, seq: SequenceDraft, base: SequenceStepConfig[], plan: ReturnWave[], today: string, patchPrimary: boolean) {
+  const g8 = deps.g8;
+  const warnings = seq.warnings;
+  const nameFor = (w: ReturnWave) => clip(`ReplyIQ · ${group.label} follow-up · ${waveTag(w)} · ${run.source.name}`, 200);
+  const descFor = (w: ReturnWave) =>
+    describeSequence(
+      run,
+      group,
+      w.key === "now"
+        ? " For people already back: step 1 sends on launch."
+        : ` For people ${waveTag(w)}: step 1 waits ${w.delayDays} day(s) after launch, so a launch on ${dayLabel(today)} emails them on ${dayLabel(w.firstEmailOn)}.`,
+    );
+  const verify = async (w: SequenceWave, configs: SequenceStepConfig[]) => {
+    try {
+      const problems = await readBack(g8, w.sequenceId!, w.listId!, configs);
+      if (problems.length) warnings.push(`${waveTag(w)}: read-back mismatch: ${problems.join("; ")}`);
+      return problems.length === 0;
+    } catch (err) {
+      warnings.push(`${waveTag(w)}: could not read the sequence back (${describeError(err)})`);
+      return false;
+    }
+  };
+  const fill = async (listId: number, w: ReturnWave) => {
+    if ((await syncList(g8, listId, w.contacts.map((c) => c.contactId))).conflictSkipped && !warnings.includes(CONFLICT_NOTE)) warnings.push(CONFLICT_NOTE);
+  };
+  const waves: SequenceWave[] = [];
+  const prev = seq.waves ?? [];
+
+  // Slot 0: the draft's own list and sequence carry the first wave.
+  const first = plan[0];
+  const own: SequenceWave = { ...first, slot: 0, listId: draft.listId, listTitle: draft.listTitle, sequenceId: seq.sequenceId, sequenceName: seq.sequenceName, verified: false, status: "failed" };
+  try {
+    const configs = withWait(base, first.delayDays);
+    await fill(draft.listId!, first);
+    if (patchPrimary) await writeSteps(g8, seq.sequenceId!, configs);
+    await g8.updateSequence(seq.sequenceId!, { name: nameFor(first), description: descFor(first) });
+    own.sequenceName = seq.sequenceName = nameFor(first);
+    own.verified = await verify(own, configs);
+    own.status = "ready";
+    seq.steps = summarise(configs);
+  } catch (err) {
+    own.error = describeError(err);
+    warnings.push(`${people(first.contacts.length)} ${waveTag(first)}: the draft's own sequence could not be timed (${own.error})`);
+  }
+  waves.push(own);
+
+  // Later dates: reuse the slot that had the same date, then any spare one, then make a new list and sequence.
+  const spare = prev.filter((w) => w.slot > 0);
+  const take = (pred: (w: SequenceWave) => boolean) => {
+    const i = spare.findIndex(pred);
+    return i === -1 ? undefined : spare.splice(i, 1)[0];
+  };
+  const later = plan.slice(1);
+  const slots = later.map((p) => take((w) => w.status !== "retired" && w.key === p.key));
+  for (const i of later.keys()) slots[i] ??= take((w) => w.status === "retired") ?? take(() => true);
+  let nextSlot = Math.max(0, ...prev.map((w) => w.slot)) + 1;
+  for (const [i, p] of later.entries()) {
+    const old = slots[i];
+    const w: SequenceWave = { ...p, slot: old?.slot ?? nextSlot++, listId: old?.listId, listTitle: old?.listTitle, sequenceId: old?.sequenceId, sequenceName: old?.sequenceName, verified: false, status: "failed" };
+    try {
+      if (!w.listId) {
+        const title = clip(`ReplyIQ · ${group.label} · return wave ${w.slot} · ${run.source.name}`, 120);
+        const list = await g8.createList(title, `ReplyIQ out-of-office follow-up: people back later, one list per return date (run ${run.id}).`, `replyiq:${run.id}:${group.key}:wave${w.slot}:list`);
+        if (!list?.id) throw new Error("graph8 did not return a list id");
+        w.listId = list.id;
+        w.listTitle = list.title ?? title;
+      }
+      await fill(w.listId, p);
+      const configs = withWait(base, p.delayDays);
+      if (w.sequenceId) {
+        await writeSteps(g8, w.sequenceId, configs);
+        await g8.updateSequence(w.sequenceId, { name: nameFor(p), description: descFor(p) });
+        w.sequenceName = nameFor(p);
+      } else {
+        seq.ownerEmail = await sequenceOwner(deps, run, seq);
+        const created = await g8.createSequence(sequenceBody(run, group, draft, seq.ownerEmail, nameFor(p), descFor(p), w.listId, configs), `replyiq:${run.id}:${group.key}:wave${w.slot}:sequence`);
+        if (!created?.id) throw new Error("graph8 did not return a sequence id");
+        w.sequenceId = created.id;
+        w.sequenceName = created.name ?? nameFor(p);
+      }
+      w.verified = await verify(w, configs);
+      w.status = "ready";
+    } catch (err) {
+      w.error = describeError(err);
+      warnings.push(`${people(p.contacts.length)} ${waveTag(p)} have no follow-up yet: ${w.error}`);
+    }
+    waves.push(w);
+  }
+
+  // Slots no date needs any more: emptied, so launching one can't reach anyone; kept for the next split.
+  for (const old of spare) {
+    const w: SequenceWave = { ...old, key: "", returnOn: null, firstEmailOn: today, delayDays: 0, contacts: [], verified: false, status: "retired", error: undefined };
+    try {
+      if (old.listId) await syncList(g8, old.listId, []);
+      if (old.sequenceId) {
+        w.sequenceName = clip(`ReplyIQ · ${group.label} follow-up · not needed (empty list) · ${run.source.name}`, 200);
+        await g8.updateSequence(old.sequenceId, { name: w.sequenceName, description: describeSequence(run, group, " Not needed: everyone moved to another return date, and its list was emptied.") });
+      }
+    } catch (err) {
+      w.error = describeError(err);
+      warnings.push(`a return-date draft that is no longer needed could not be emptied (${w.error}); don't launch "${old.sequenceName ?? old.sequenceId}"`);
+    }
+    waves.push(w);
+  }
+
+  seq.waves = waves;
+  seq.wavesCountedOn = today;
+  seq.verified = waves.every((w) => w.status === "retired" || (w.status === "ready" && w.verified));
+  deps.log?.(`  timed to return dates: ${waves.filter((w) => w.status !== "retired").map((w) => `${waveTag(w)} (${w.contacts.length}, waits ${w.delayDays}d)`).join(", ")}`);
 }
 
 /**
@@ -583,8 +784,26 @@ export async function buildFollowupSequence(deps: SequenceDeps, run: Run, group:
   const now = () => (deps.now ?? (() => new Date()))().toISOString();
   const log = deps.log ?? (() => {});
   if (!draft.listId) throw new Error("the draft has no audience list yet");
+  // Out of office: the audience split by return date, waits counted from today.
+  const today = isoDay((deps.now ?? (() => new Date()))());
+  const plan = timedByReturnDate(group.key) ? planReturnWaves(group, draft.audience, today) : [];
 
   const existing = draft.sequence;
+  if (opts.retime) {
+    // Same checked steps, split and timed again: people whose date has passed move to "back already".
+    if (!existing?.sequenceId || existing.status !== "ready") throw new Error("there is no follow-up sequence to recount yet");
+    const seq: SequenceDraft = { ...existing, warnings: [] };
+    if (plan.length) {
+      try {
+        await deps.g8.assertWriteAllowed();
+        await applyWaves(deps, run, group, draft, seq, await storedConfigs(deps.g8, existing.sequenceId), plan, today, true);
+      } catch (err) {
+        seq.warnings.push(`the waits could not be recounted (${describeError(err)})`);
+      }
+    }
+    seq.updatedAt = now();
+    return seq;
+  }
   if (existing?.sequenceId && !opts.rebuild && !opts.refresh) {
     const seq: SequenceDraft = { ...existing, warnings: [] };
     if ((opts.previews ?? 0) > 0) await previewStep1(deps, run, group, draft, seq, opts.previews!); // asked for: fresh previews
@@ -595,12 +814,13 @@ export async function buildFollowupSequence(deps: SequenceDeps, run: Run, group:
   const inPlace = Boolean(existing?.sequenceId && opts.refresh && !opts.rebuild);
   const seq: SequenceDraft = inPlace
     ? { ...existing!, status: "failed", error: undefined, previews: undefined, previewCredits: undefined, verified: false, warnings: [] }
-    : { status: "failed", steps: [], instructions: "", facts: [], doNotClaim: [], originalRules: [], verified: false, senderAttached: false, warnings: [], updatedAt: now() };
+    : // A new sequence keeps the earlier return-date slots, so they are reused or emptied rather than left full.
+      { status: "failed", steps: [], instructions: "", facts: [], doNotClaim: [], originalRules: [], verified: false, senderAttached: false, warnings: [], updatedAt: now(), ...(existing?.waves ? { waves: existing.waves } : {}) };
   const warnings = seq.warnings;
   try {
     await deps.g8.assertWriteAllowed();
     await compose(deps, run, group, seq);
-    const configs = [step1Config(seq), ...(seq.manualEmail?.check.ok ? [step2Config(seq.manualEmail)] : [])];
+    const configs = [step1Config(seq, plan[0]?.delayDays ?? 0), ...(seq.manualEmail?.check.ok ? [step2Config(seq.manualEmail)] : [])];
 
     if (inPlace) {
       // Re-write the existing draft's steps; never a second sequence.
@@ -609,7 +829,7 @@ export async function buildFollowupSequence(deps: SequenceDeps, run: Run, group:
       const s1 = stored.find((x) => Number(x.step_order) === 1);
       const s2 = stored.find((x) => Number(x.step_order) === 2);
       if (!s1?.id) throw new Error("the existing sequence has no step 1 to refresh");
-      await deps.g8.updateSequenceStep(id, String(s1.id), { input_type: "ON_DEMAND", step_data: configs[0].step_data });
+      await deps.g8.updateSequenceStep(id, String(s1.id), { input_type: "ON_DEMAND", time_interval: configs[0].time_interval, step_data: configs[0].step_data });
       if (configs[1]) {
         if (s2?.id) await deps.g8.updateSequenceStep(id, String(s2.id), { input_type: "MANUAL_TEMPLATE", time_interval: configs[1].time_interval, step_data: configs[1].step_data });
         else await deps.g8.addSequenceSteps(id, [configs[1]]);
@@ -622,22 +842,9 @@ export async function buildFollowupSequence(deps: SequenceDeps, run: Run, group:
       log(`  sequence ${id} refreshed in place (${configs.length} step(s))`);
     } else {
       // Owner: the original sequence's owner unless configured.
-      let owner = deps.ownerEmail;
-      if (!owner && run.source.sequences[0]) owner = (await deps.g8.getSequence(run.source.sequences[0].id)).user_email ?? undefined;
-      if (!owner) throw new Error("no sequence owner email: set G8_SEQUENCE_OWNER_EMAIL");
-      seq.ownerEmail = owner;
+      seq.ownerEmail = await sequenceOwner(deps, run, seq);
       const name = clip(`ReplyIQ · ${group.label} follow-up · ${run.source.name}`, 200);
-      const body: SequenceCreateBody = {
-        name,
-        description: clip(`ReplyIQ follow-up for "${group.label}" (run ${run.id}). Step 1: graph8's AI writes each email from ReplyIQ's grounded instructions. Step 2: ReplyIQ's fact-checked text. No sender attached; a person launches it.`, 500),
-        user_email: owner,
-        finish_on_reply: true,
-        send_in_same_thread: true,
-        wait_for_new_contacts: false,
-        associated_list_id: draft.listId,
-        ...(draft.campaignId ? { campaign_id: draft.campaignId } : {}),
-        steps: configs,
-      };
+      const body = sequenceBody(run, group, draft, seq.ownerEmail, name, describeSequence(run, group), draft.listId, configs);
       const created = await deps.g8.createSequence(body, `replyiq:${run.id}:${group.key}:sequence${opts.rebuild ? `:${Date.now()}` : ""}`);
       if (!created?.id) throw new Error("graph8 did not return a sequence id");
       seq.sequenceId = created.id;
@@ -646,12 +853,16 @@ export async function buildFollowupSequence(deps: SequenceDeps, run: Run, group:
     }
     seq.steps = summarise(configs);
 
-    try {
-      const problems = await readBack(deps.g8, seq.sequenceId!, draft.listId, configs);
-      seq.verified = problems.length === 0;
-      if (problems.length) warnings.push(`read-back mismatch: ${problems.join("; ")}`);
-    } catch (err) {
-      warnings.push(`could not read the sequence back (${describeError(err)})`);
+    if (plan.length) {
+      await applyWaves(deps, run, group, draft, seq, configs, plan, today, false);
+    } else {
+      try {
+        const problems = await readBack(deps.g8, seq.sequenceId!, draft.listId, configs);
+        seq.verified = problems.length === 0;
+        if (problems.length) warnings.push(`read-back mismatch: ${problems.join("; ")}`);
+      } catch (err) {
+        warnings.push(`could not read the sequence back (${describeError(err)})`);
+      }
     }
 
     seq.status = "ready";
@@ -668,19 +879,46 @@ export async function buildFollowupSequence(deps: SequenceDeps, run: Run, group:
  * Read-only check of a recorded follow-up sequence against graph8 (live tests, e2e): the draft's list is
  * attached, it is not running, no sender is attached, and the steps are what ReplyIQ recorded.
  */
-export async function verifyRecordedSequence(g8: Pick<G8Client, "getSequence" | "getSequenceSteps" | "getSequenceChannels">, draft: CampaignDraft): Promise<string[]> {
+export async function verifyRecordedSequence(g8: Pick<G8Client, "getSequence" | "getSequenceSteps" | "getSequenceChannels" | "listContactsOfList">, draft: CampaignDraft): Promise<string[]> {
   const seq = draft.sequence;
   if (!seq?.sequenceId) return ["no sequence recorded"];
-  const [detail, stored, channels] = await Promise.all([g8.getSequence(seq.sequenceId), g8.getSequenceSteps(seq.sequenceId), g8.getSequenceChannels(seq.sequenceId)]);
+  const check = async (sequenceId: string, listId: number | undefined, waitDays: number): Promise<string[]> => {
+    const [detail, stored, channels] = await Promise.all([g8.getSequence(sequenceId), g8.getSequenceSteps(sequenceId), g8.getSequenceChannels(sequenceId)]);
+    const problems: string[] = [];
+    if (Number(detail.associated_list_id) !== listId) problems.push(`sequence list ${detail.associated_list_id}, expected ${listId}`);
+    if (/live|running|active|scheduling/i.test(String(detail.status ?? ""))) problems.push(`sequence is ${detail.status}`);
+    if (channels.length) problems.push(`${channels.length} sender(s) attached`);
+    const got = sortedSteps(stored.steps);
+    if (got.length !== seq.steps.length) problems.push(`${got.length} step(s) in graph8, ${seq.steps.length} recorded`);
+    if (String(got[0]?.input_type).toUpperCase() !== "ON_DEMAND") problems.push("step 1 is not written on demand");
+    if (norm(got[0]?.step_data?.instructions ?? "") !== norm(seq.instructions)) problems.push("step 1 instructions differ from the recorded ones");
+    if (Number(got[0]?.time_interval ?? 0) !== waitDays * DAY_S) problems.push(`step 1 waits ${inDays(Number(got[0]?.time_interval ?? 0))} in graph8, recorded ${waitDays} day(s)`);
+    const s2 = seq.steps.find((x) => x.order === 2);
+    if (s2 && norm(got[1]?.step_data?.subject ?? "") !== norm(s2.subject ?? "")) problems.push("step 2 subject differs from the recorded one");
+    return problems;
+  };
+  const members = async (listId: number, want: number[]) => {
+    const ids = new Set((await g8.listContactsOfList(listId)).map((m) => m.id));
+    return ids.size === want.length && want.every((id) => ids.has(id)) ? [] : [`list ${listId} holds ${ids.size} contact(s), recorded ${want.length}`];
+  };
+  if (!seq.waves?.length) return check(seq.sequenceId, draft.listId, seq.steps[0]?.delayDays ?? 0);
+  // Out of office: every return-date wave is its own list and draft sequence, with its own wait.
   const problems: string[] = [];
-  if (Number(detail.associated_list_id) !== draft.listId) problems.push(`sequence list ${detail.associated_list_id}, expected ${draft.listId}`);
-  if (/live|running|active|scheduling/i.test(String(detail.status ?? ""))) problems.push(`sequence is ${detail.status}`);
-  if (channels.length) problems.push(`${channels.length} sender(s) attached`);
-  const got = sortedSteps(stored.steps);
-  if (got.length !== seq.steps.length) problems.push(`${got.length} step(s) in graph8, ${seq.steps.length} recorded`);
-  if (String(got[0]?.input_type).toUpperCase() !== "ON_DEMAND") problems.push("step 1 is not written on demand");
-  if (norm(got[0]?.step_data?.instructions ?? "") !== norm(seq.instructions)) problems.push("step 1 instructions differ from the recorded ones");
-  const s2 = seq.steps.find((x) => x.order === 2);
-  if (s2 && norm(got[1]?.step_data?.subject ?? "") !== norm(s2.subject ?? "")) problems.push("step 2 subject differs from the recorded one");
+  for (const w of seq.waves) {
+    const tag = w.status === "retired" ? `spare slot ${w.slot}` : waveTag(w);
+    const own = (ps: string[]) => problems.push(...ps.map((p) => `${tag}: ${p}`));
+    if (w.status === "failed" || !w.sequenceId || !w.listId) {
+      if (w.status !== "retired") own([`not created (${w.error ?? "no sequence"})`]);
+      else if (w.listId) own(await members(w.listId, []));
+      continue;
+    }
+    if (w.status === "retired") {
+      own(await members(w.listId, []));
+      continue;
+    }
+    if (w.slot === 0 && (w.sequenceId !== seq.sequenceId || w.listId !== draft.listId)) own(["slot 0 is not the draft's own list and sequence"]);
+    own(await check(w.sequenceId, w.listId, w.delayDays));
+    own(await members(w.listId, w.contacts.map((c) => c.contactId)));
+  }
   return problems;
 }

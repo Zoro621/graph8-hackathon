@@ -11,6 +11,7 @@ import type { CampaignDraft, Category, Group, Run, SourceSummary, StudioLearning
 import { emptyRun, runPipeline } from "../pipeline/runPipeline";
 import { discoverSources } from "../pipeline/sources";
 import { DraftError, draftCampaign, nameKey, parsePersonNames } from "../pipeline/draftCampaign";
+import { isoDay, planReturnWaves, timedByReturnDate } from "../pipeline/returnDates";
 import { enrichAndRecount } from "../pipeline/referralEnrich";
 import { toPlainText } from "../pipeline/fetchReplies";
 import { LearningsError, applyLearnings, proposeLearnings, removeLearnings } from "../pipeline/studioLearnings";
@@ -226,12 +227,21 @@ export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, minGro
 }
 
 /** The run as the UI needs it: no full conversations, no document backups, plus live job state. */
-export function toRunView(run: Run, minGroup = 2, org?: string, previous: Partial<Record<Category, PreviousDraft>> = {}, job: JobView | null = activeJob(run.id)): RunView {
+export function toRunView(
+  run: Run,
+  minGroup = 2,
+  org?: string,
+  previous: Partial<Record<Category, PreviousDraft>> = {},
+  job: JobView | null = activeJob(run.id),
+  today = isoDay(new Date()),
+): RunView {
   const groups: GroupView[] = run.groups.map((g) => ({
     ...g,
     replies: g.replies.map(({ conversation, ...r }) => ({ ...r, messages: conversation.length })),
     draftable: draftability(run, g, minGroup, org),
     ...(previous[g.key] ? { previousDraft: previous[g.key] } : {}),
+    // Out of office: how the eligible contacts would split by return date if drafted today.
+    ...(timedByReturnDate(g.key) ? { returnWaves: planReturnWaves(g, g.eligible, today) } : {}),
   }));
   const working = run.status === "running" || run.groups.some((g) => g.draft?.status === "drafting");
   return { ...run, groups, learnings: stripLearnings(run.learnings), job, interrupted: working && !job, otherOrg: fromOtherOrg(run, org) };
@@ -306,8 +316,9 @@ export const DraftBody = z
      * create: list + Studio campaign + follow-up sequence. patch: add the Answer Card to docs that were still generating.
      * previews: graph8 drafts step 1 for a few contacts. rewrite: re-write the follow-up emails (and the channel plan)
      * in the same Sequencer draft. adopt: take over an earlier run's draft of this group (`fromRunId`) instead of creating one.
+     * retime (out of office): split by return date again and recount step 1's waits from today; same emails, no model.
      */
-    action: z.enum(["create", "patch", "previews", "rewrite", "adopt", "enrich"]).default("create"),
+    action: z.enum(["create", "patch", "previews", "rewrite", "adopt", "enrich", "retime"]).default("create"),
     previews: z.number().int().min(0).max(3).default(0),
     fromRunId: z.string().regex(/^[a-z0-9]{12}$/).optional(),
   })
@@ -351,6 +362,8 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
   const fresh = input.action === "create" || input.action === "adopt";
   if (!fresh && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
   if (input.action === "rewrite" && group.draft?.sequence?.status !== "ready") throw new ApiError(409, "not_possible", "This draft has no follow-up emails to rewrite yet");
+  if (input.action === "retime" && !timedByReturnDate(groupKey)) throw new ApiError(409, "not_possible", "Only out-of-office follow-ups are timed to return dates");
+  if (input.action === "retime" && group.draft?.sequence?.status !== "ready") throw new ApiError(409, "not_possible", "This draft has no follow-up emails to time yet");
   if (input.action === "adopt" && group.draft?.campaignId) throw new ApiError(409, "not_possible", "This run already has its own draft for this group");
   // Same preflight the UI shows, so a direct request can't start a draft that is bound to fail.
   if (fresh) {
@@ -399,8 +412,9 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
           runId,
           groupKey,
           patchOnly: input.action === "patch",
-          sequenceOnly: input.action === "previews" || input.action === "rewrite",
+          sequenceOnly: input.action === "previews" || input.action === "rewrite" || input.action === "retime",
           refreshSequence: input.action === "rewrite",
+          retime: input.action === "retime",
           // Resuming a takeover that stopped part-way continues it, so the earlier run's section is still replaced.
           adopt: input.action === "adopt" || (input.action === "create" && Boolean(group.draft?.adoptedFrom)),
           previews: input.action === "previews" ? Math.max(1, input.previews) : input.previews,

@@ -50,7 +50,7 @@ export const keys = {
 
 export const api = {
   startRun: (body: { sequenceId: string } | { campaignId: string }) => post<{ runId: string }>(keys.runs, body),
-  draft: (runId: string, group: Category, body: { action: "create" | "patch" | "previews" | "rewrite" | "adopt" | "enrich"; previews?: number; fromRunId?: string }) =>
+  draft: (runId: string, group: Category, body: { action: "create" | "patch" | "previews" | "rewrite" | "adopt" | "enrich" | "retime"; previews?: number; fromRunId?: string }) =>
     post<{ runId: string; group: Category }>(`${keys.run(runId)}/groups/${group}/draft`, body),
   learnings: (runId: string, action: "propose" | "apply" | "remove") => post<LearningsView>(`${keys.run(runId)}/learnings`, { action }),
   refreshSources: () => request<SourceSummary[]>(`${keys.sources}?refresh=1`),

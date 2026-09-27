@@ -1,5 +1,5 @@
 // Response shapes of the app's own API routes (app/api/*). Safe to import from client code.
-import type { Category, Classified, Group, Run, SourceSummary, StudioLearnings } from "./types";
+import type { Category, Classified, Group, ReturnWave, Run, SourceSummary, StudioLearnings } from "./types";
 import type { WritePolicy } from "./g8";
 
 export type WritePolicyView = WritePolicy;
@@ -26,7 +26,13 @@ export interface PreviousDraft {
   audience: number;
 }
 
-export type GroupView = Omit<Group, "replies"> & { replies: ReplyView[]; draftable: Draftability; previousDraft?: PreviousDraft };
+export type GroupView = Omit<Group, "replies"> & {
+  replies: ReplyView[];
+  draftable: Draftability;
+  previousDraft?: PreviousDraft;
+  /** Out of office, before drafting: the eligible contacts split by return date, waits counted from today. */
+  returnWaves?: ReturnWave[];
+};
 
 /** One step of a sequence as the V1 -> V2 view shows it. */
 export interface StepView {

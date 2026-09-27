@@ -25,7 +25,9 @@ export default function AudienceTable({ group, runExcluded }: { group: GroupView
     <div className="flex flex-col gap-8">
       {draftAudience.length > 0 && (
         <div>
-          <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-lime">On the graph8 list · {draftAudience.length}</p>
+          <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-lime">
+            On the graph8 list{(group.draft?.sequence?.waves?.filter((w) => w.status !== "retired").length ?? 0) > 1 ? "s (one per return date)" : ""} · {draftAudience.length}
+          </p>
           <ul className="surface divide-y divide-line overflow-hidden rounded-2xl">
             {draftAudience.map((c) => (
               <li key={c.contactId} className="flex items-center gap-3 px-4 py-3 text-sm">

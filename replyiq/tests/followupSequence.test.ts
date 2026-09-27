@@ -163,6 +163,11 @@ function fakeG8(opts: { notAllowed?: boolean; createFails?: boolean; owner?: str
       stored = [...stored, ...steps.map((s) => ({ ...s, id: `step-${s.step_order}` }))];
       return {};
     },
+    updateSequence: async () => ({}),
+    createList: async (title: string) => ({ id: 78, title }),
+    addContactsToList: async () => ({ conflictSkipped: false }),
+    listContactsOfList: async () => [] as { id: number | null; work_email: string | null }[],
+    removeContactsFromList: async () => undefined,
     findContactByEmail: async (email: string) => ({ id: 1, first_name: "Pat", last_name: "Lee", work_email: email, job_title: "VP Sales", company_id: null }),
     estimateEmailDraft: async () => {
       log.estimates++;

@@ -49,7 +49,10 @@ export default function FollowupEmails({ group, sequence }: { group: GroupView; 
   if (!sequence) {
     return (
       <div className="flex flex-col gap-5 text-sm leading-relaxed text-muted">
-        <p>When you draft, ReplyIQ builds a two-step follow-up sequence in graph8&apos;s Sequencer. It is created as a draft with no sender attached, so nothing can send until a person launches it.</p>
+        <p>
+          When you draft, ReplyIQ builds a two-step follow-up sequence in graph8&apos;s Sequencer. It is created as a draft with no sender attached, so nothing can send until a person launches it.
+          {group.returnWaves && group.returnWaves.length > 1 ? " Out of office: one draft per return date, each with the same two steps and step 1 waiting until those people are back." : ""}
+        </p>
         <ol className="flex flex-col gap-3">
           <li className="rounded-2xl border border-line bg-white/[0.02] p-4">
             <p className="flex items-center gap-2 font-medium text-text">
@@ -82,10 +85,11 @@ export default function FollowupEmails({ group, sequence }: { group: GroupView; 
   }
 
   const step2 = sequence.steps.find((s) => s.inputType === "MANUAL_TEMPLATE");
+  const drafts = sequence.waves?.filter((w) => w.status !== "retired").length ?? 0;
   return (
     <div className="flex flex-col gap-7">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium text-text">{sequence.sequenceName}</span>
+        <span className="font-medium text-text">{drafts > 1 ? `The same emails in ${drafts} Sequencer drafts, one per return date` : sequence.sequenceName}</span>
         <Chip color={sequence.verified ? "#4fe3d1" : "#ffb547"}>{sequence.verified ? "read back from graph8" : "not verified"}</Chip>
         <Chip>
           <ShieldAlert className="size-3" /> no sender attached
@@ -94,7 +98,7 @@ export default function FollowupEmails({ group, sequence }: { group: GroupView; 
 
       <section className="flex flex-col gap-3">
         <h4 className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.2em] text-iris">
-          <Bot className="size-3.5" /> Step 1 · day 0 · graph8&apos;s AI writes each email at send time
+          <Bot className="size-3.5" /> Step 1 · {sequence.waves?.length ? "when they're back (see Return dates)" : "day 0"} · graph8&apos;s AI writes each email at send time
         </h4>
         <div className="rounded-2xl border border-line bg-white/[0.02] p-4 text-sm">
           <p className="text-muted">It can only state these {sequence.facts.length} facts, each found word for word in a company document:</p>
@@ -138,7 +142,7 @@ export default function FollowupEmails({ group, sequence }: { group: GroupView; 
 
       <section className="flex flex-col gap-3">
         <h4 className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.2em] text-lime">
-          <FileText className="size-3.5" /> Step 2 · day {step2?.delayDays ?? 4} · ReplyIQ&apos;s text
+          <FileText className="size-3.5" /> Step 2 · {step2?.delayDays ?? 4} days after step 1 · ReplyIQ&apos;s text
         </h4>
         {sequence.manualEmail ? (
           <EmailCard

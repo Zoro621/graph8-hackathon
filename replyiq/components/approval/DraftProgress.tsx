@@ -11,9 +11,10 @@ interface Stage {
 }
 
 /** The draft's real stages, read from what graph8 has returned so far (lib/pipeline/draftCampaign.ts). */
-export function draftStages(d: CampaignDraft | undefined): Stage[] {
+export function draftStages(d: CampaignDraft | undefined, timed = false): Stage[] {
   const seq = d?.sequence;
-  return [
+  const waves = seq?.waves?.filter((w) => w.status !== "retired") ?? [];
+  const stages: Stage[] = [
     { label: "Re-check hard stops and suppression", done: Boolean(d?.audience.length), detail: d?.audience.length ? `${d.audience.length} contacts cleared` : undefined },
     { label: "Create the audience list", done: Boolean(d?.listId), detail: d?.listTitle },
     { label: "Create the Studio campaign", done: Boolean(d?.campaignId), detail: d?.campaignName },
@@ -28,12 +29,20 @@ export function draftStages(d: CampaignDraft | undefined): Stage[] {
             : undefined,
     },
     { label: "Add the Answer Card to the docs", done: Boolean(d?.docsPatched.length), detail: d?.docsPatched.length ? docList(d.docsPatched) : undefined },
-    { label: "Write and fact-check the follow-up emails", done: Boolean(seq), detail: seq ? (seq.status === "ready" ? seq.sequenceName : seq.error) : undefined },
+    { label: "Write and fact-check the follow-up emails", done: Boolean(seq), detail: seq ? (seq.status === "ready" ? (waves.length > 1 ? "the same emails in every return-date draft" : seq.sequenceName) : seq.error) : undefined },
   ];
+  // Out of office: each return date gets its own Sequencer draft, step 1 waiting until they are back.
+  if (timed)
+    stages.push({
+      label: "Time the first email to each return date",
+      done: waves.length > 0,
+      detail: waves.length ? `${waves.length} return date${waves.length === 1 ? "" : "s"}, ${waves.length} Sequencer draft${waves.length === 1 ? "" : "s"}` : undefined,
+    });
+  return stages;
 }
 
-export default function DraftProgress({ draft, working }: { draft: CampaignDraft | undefined; working: boolean }) {
-  const stages = draftStages(draft);
+export default function DraftProgress({ draft, working, timed = false }: { draft: CampaignDraft | undefined; working: boolean; timed?: boolean }) {
+  const stages = draftStages(draft, timed);
   const active = working ? stages.findIndex((s) => !s.done) : -1;
   const failed = draft?.status === "failed";
   return (

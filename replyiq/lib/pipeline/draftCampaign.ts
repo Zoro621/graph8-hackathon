@@ -19,9 +19,10 @@ import { docLabel, docList } from "../docLabels";
 import type { Llm } from "../llm";
 import type { RunStore } from "../store";
 import { allowsFollowUpCampaign, categoryInfo, isHardStop } from "../taxonomy";
-import type { CampaignDraft, Classified, Group, Run } from "../types";
+import type { CampaignDraft, Classified, Group, ReturnWave, Run } from "../types";
 import { callStops } from "./channels";
-import { buildFollowupSequence, type SequenceClient } from "./followupSequence";
+import { buildFollowupSequence, CONFLICT_NOTE, syncList, type SequenceClient } from "./followupSequence";
+import { isoDay, planReturnWaves, timedByReturnDate, wavesSummary } from "./returnDates";
 import { planStrategy, strategySection } from "./strategy";
 import { findCampaignDoc } from "./sources";
 
@@ -117,17 +118,22 @@ const hardStopContacts = (run: Run) => {
   return { ids, emails };
 };
 
-export function timingNote(group: Group): string | undefined {
+/**
+ * When the first emails go out. Out of office (with its return-date split): per date, as drafted. Other "later"
+ * groups: advice on when to launch, with the timing they mentioned.
+ */
+export function timingNote(group: Group, waves?: ReturnWave[], countedOn?: string): string | undefined {
   const info = categoryInfo(group.key);
   if (info.followUp !== "later") return undefined;
+  if (waves?.length && countedOn) return wavesSummary(waves, countedOn);
   const hints = [...new Set(group.replies.map((r) => r.revisitHint).filter((h): h is string => Boolean(h)))];
   return hints.length
-    ? `Advisory: launch after the prospects are back. Return dates mentioned: ${hints.join("; ")}. graph8 has no delayed start, so hold the launch until then.`
-    : "Advisory: these prospects asked for later contact; hold the launch until the timing is right.";
+    ? `Advisory: launch once the timing they mentioned has come (${hints.join("; ")}).`
+    : "Advisory: these prospects asked for later contact; launch when the timing is right.";
 }
 
 /** The Studio campaign brief, assembled from grounded data only (no free-form model text in facts). */
-export function buildBrief(run: Run, group: Group, audienceSize: number): string {
+export function buildBrief(run: Run, group: Group, audienceSize: number, timing = timingNote(group)): string {
   const info = categoryInfo(group.key);
   const card = group.card;
   const lines: string[] = [
@@ -149,7 +155,6 @@ export function buildBrief(run: Run, group: Group, audienceSize: number): string
   if (group.key === "referral_wrong_person") {
     lines.push("", "## Referral", "Each contact was named by a previous contact who left or pointed us onward. Open with the referral (\"<name> suggested I reach out\").");
   }
-  const timing = timingNote(group);
   if (timing) lines.push("", "## Timing", timing);
   lines.push(
     "",
@@ -226,7 +231,7 @@ export function upsertSection(content: string, section: string, mark: string, re
   return `${content.slice(0, at)}${section}\n${after === -1 ? "" : `\n${content.slice(end)}`}`;
 }
 
-export function cardSection(run: Run, group: Group, kind: "objections" | "replyTemplates"): string {
+export function cardSection(run: Run, group: Group, kind: "objections" | "replyTemplates", timing = timingNote(group)): string {
   const card = group.card;
   const head =
     kind === "objections"
@@ -244,7 +249,6 @@ export function cardSection(run: Run, group: Group, kind: "objections" | "replyT
   } else {
     lines.push(`**Angle:** ${categoryInfo(group.key).angle ?? "Follow up on what they told us."}`);
     for (const t of group.themes ?? []) lines.push(`- *${t.label}* (${t.threadIds.length}): ${t.description}`);
-    const timing = timingNote(group);
     if (timing) lines.push("", timing);
   }
   return lines.join("\n");
@@ -292,6 +296,8 @@ export interface DraftOptions {
    */
   adopt?: boolean;
   skipStrategy?: boolean; // do not (re)build the revised strategy
+  /** Out of office: split the audience by return date again and recount step 1's waits from today. Same emails; no model. */
+  retime?: boolean;
 }
 
 export class DraftError extends Error {
@@ -328,6 +334,7 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
     : { status: "drafting", audience: [], audienceNotes: [], docsPatched: [], docsPending: [], docsFailed: [], generation: "unknown", warnings: [], createdAt: now(), updatedAt: now() };
   draft.docsFailed ??= [];
   if (opts.patchOnly && !draft.campaignId) throw new DraftError("no existing draft to patch; create it first");
+  if (opts.retime && (!timedByReturnDate(group.key) || draft.sequence?.status !== "ready")) throw new DraftError("only an out-of-office draft with follow-up emails has waits to recount");
   if (opts.sequenceOnly && !draft.listId) throw new DraftError("no existing draft with a list; create the draft first");
   await save(draft);
 
@@ -390,34 +397,34 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
   // An adopted draft's documents carry the earlier run's section: always replace it with this run's.
   const refreshDocs = Boolean(opts.refreshDocs || opts.adopt);
 
+  // Out of office: the audience split by return date. The draft's own list holds the first wave (the follow-up
+  // sequence adds a list per later date), so launching the campaign's list never reaches someone still away.
+  const today = isoDay(new Date(now()));
+  const planFor = (audience: CampaignDraft["audience"]) => (timedByReturnDate(group.key) ? planReturnWaves(group, audience, today) : []);
+  const firstList = (audience: CampaignDraft["audience"]) => (planFor(audience)[0]?.contacts ?? audience).map((a) => a.contactId);
+  const timingFor = (audience: CampaignDraft["audience"]) => timingNote(group, planFor(audience), today);
+
   // Stages 1-5: audience, list, Studio campaign, documents.
   const studioStages = async () => {
     if (draft.campaignId && opts.adopt) {
       // Taking over an earlier run's draft: this run's audience replaces the list's members, and this run's
       // evidence replaces the brief. The campaign, its documents and the sequence stay the same objects.
       const audience = await buildAudience();
-      const members = new Set((await deps.g8.listContactsOfList(draft.listId!)).map((m) => m.id).filter((x): x is number => typeof x === "number"));
-      const wanted = new Set(audience.map((a) => a.contactId));
-      const remove = [...members].filter((id) => !wanted.has(id));
-      const add = [...wanted].filter((id) => !members.has(id));
-      if (remove.length) await deps.g8.removeContactsFromList(draft.listId!, remove);
-      if (add.length) {
-        const added = await deps.g8.addContactsToList(draft.listId!, add);
-        if (added.conflictSkipped) draft.audienceNotes.push("graph8 flagged some contacts (e.g. already in other outreach); they were skipped, not forced in");
-      }
+      const synced = await syncList(deps.g8, draft.listId!, firstList(audience));
+      if (synced.conflictSkipped) draft.audienceNotes.push(CONFLICT_NOTE);
       draft.audience = audience;
-      draft.timingNote = timingNote(group);
+      draft.timingNote = timingFor(audience);
       await save(draft);
-      log(`  list ${draft.listId} synced to this run's audience (+${add.length} / -${remove.length})`);
+      log(`  list ${draft.listId} synced to this run's audience (+${synced.added} / -${synced.removed})`);
       try {
-        await deps.g8.updateCampaign(draft.campaignId, { brief: buildBrief(run, group, audience.length) });
+        await deps.g8.updateCampaign(draft.campaignId, { brief: buildBrief(run, group, audience.length, draft.timingNote) });
       } catch (err) {
         draft.warnings.push(`the campaign brief could not be updated (${describeError(err)})`);
       }
     } else if (!draft.campaignId) {
       const audience = await buildAudience();
       draft.audience = audience;
-      draft.timingNote = timingNote(group);
+      draft.timingNote = timingFor(audience);
       await save(draft);
 
       // 3) List.
@@ -430,8 +437,8 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
         await save(draft);
         log(`  list ${draft.listId} created`);
       }
-      const added = await deps.g8.addContactsToList(draft.listId, audience.map((a) => a.contactId));
-      if (added.conflictSkipped) draft.audienceNotes.push("graph8 flagged some contacts (e.g. already in other outreach); they were skipped, not forced in");
+      const added = await deps.g8.addContactsToList(draft.listId, firstList(audience));
+      if (added.conflictSkipped) draft.audienceNotes.push(CONFLICT_NOTE);
       await save(draft);
 
       // 4) Campaign.
@@ -450,7 +457,7 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
         {
           name,
           category: "Outbound",
-          brief: buildBrief(run, group, audience.length),
+          brief: buildBrief(run, group, audience.length, draft.timingNote),
           core_concept: fields.core_concept,
           primary_hook: fields.primary_hook,
           target_persona: fields.target_persona,
@@ -493,9 +500,9 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
     // Failed (empty) -> write our grounded section into it. Still generating -> leave alone, patch later.
     draft.docsPending = [];
     const targets: { kind: "objections" | "replyTemplates" | "brief"; render: () => string }[] = [
-      { kind: "objections", render: () => cardSection(run, group, "objections") },
-      { kind: "replyTemplates", render: () => cardSection(run, group, "replyTemplates") },
-      { kind: "brief", render: () => `${marker(run.id, group.key)}\n${buildBrief(run, group, draft.audience.length)}` },
+      { kind: "objections", render: () => cardSection(run, group, "objections", draft.timingNote) },
+      { kind: "replyTemplates", render: () => cardSection(run, group, "replyTemplates", draft.timingNote) },
+      { kind: "brief", render: () => `${marker(run.id, group.key)}\n${buildBrief(run, group, draft.audience.length, draft.timingNote)}` },
     ];
     for (const { kind, render } of targets) {
       const meta = findCampaignDoc(docs, kind);
@@ -530,7 +537,7 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
   };
 
   try {
-    if (!opts.sequenceOnly) await studioStages();
+    if (!opts.sequenceOnly && !opts.retime) await studioStages(); // recounting the waits touches only the follow-up sequences
     // 6) The follow-up emails, as a Sequencer draft. Not critical for the Studio draft: failures are warnings.
     if (!opts.skipSequence) {
       try {
@@ -539,22 +546,32 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
           run,
           group,
           draft,
-          { previews: opts.previews, rebuild: opts.rebuildSequence, refresh: opts.refreshSequence || opts.adopt },
+          { previews: opts.previews, rebuild: opts.rebuildSequence, refresh: opts.refreshSequence || opts.adopt, retime: opts.retime },
         );
         if (draft.sequence.status === "failed") draft.warnings.push(`follow-up sequence not created: ${draft.sequence.error}`);
       } catch (err) {
         draft.warnings.push(`follow-up sequence not created: ${describeError(err)}`);
       }
+      // The timing now reads what was drafted: each return date's wave as it stands in graph8.
+      const waves = draft.sequence?.waves?.filter((w) => w.status !== "retired");
+      if (waves?.length) draft.timingNote = timingNote(group, waves, draft.sequence!.wavesCountedOn);
       await save(draft);
+      if (opts.retime) {
+        try {
+          await deps.g8.updateCampaign(draft.campaignId!, { brief: `${buildBrief(run, group, draft.audience.length, draft.timingNote)}${draft.strategy ? `\n\n${strategySection(draft.strategy)}` : ""}` });
+        } catch (err) {
+          draft.warnings.push(`the campaign brief could not be updated with the new dates (${describeError(err)})`);
+        }
+      }
     }
     // 7) The revised strategy across channels, from every channel's evidence. Not critical: failures are warnings.
     // Previews and late-doc patches leave it alone; a new draft, a rewrite and a takeover (re)build it.
-    const wantsStrategy = !opts.patchOnly && (!opts.sequenceOnly || opts.refreshSequence) && !opts.skipStrategy;
+    const wantsStrategy = !opts.patchOnly && !opts.retime && (!opts.sequenceOnly || opts.refreshSequence) && !opts.skipStrategy;
     if (wantsStrategy && deps.llm && draft.sequence?.status === "ready") {
       try {
         draft.strategy = await planStrategy({ llm: deps.llm, model: deps.model, auditModel: deps.auditModel }, run, group, draft.sequence.facts, draft.sequence.doNotClaim, new Date(now()));
         await save(draft);
-        await deps.g8.updateCampaign(draft.campaignId!, { brief: `${buildBrief(run, group, draft.audience.length)}\n\n${strategySection(draft.strategy)}` });
+        await deps.g8.updateCampaign(draft.campaignId!, { brief: `${buildBrief(run, group, draft.audience.length, draft.timingNote)}\n\n${strategySection(draft.strategy)}` });
       } catch (err) {
         draft.warnings.push(`revised strategy not added (${describeError(err)})`);
       }

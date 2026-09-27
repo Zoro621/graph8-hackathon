@@ -478,13 +478,23 @@ async function verifyDraft(runId: string, key: Category): Promise<{ detail: stri
   must(!full.is_launched, "the draft was launched");
   const members = await client.listContactsOfList(d.listId!);
   const ids = new Set(members.map((m) => m.id));
-  for (const a of d.audience) must(ids.has(a.contactId), `contact ${a.contactId} missing from list ${d.listId}`);
+  // Out of office: the campaign's own list holds the first return-date wave; each later date has its own list (checked below).
+  const own = d.sequence?.waves?.find((w) => w.slot === 0)?.contacts ?? d.audience;
+  for (const a of own) must(ids.has(a.contactId), `contact ${a.contactId} missing from list ${d.listId}`);
+  const waves = (d.sequence?.waves ?? []).filter((w) => w.status !== "retired");
+  const inWaves = new Set(waves.flatMap((w) => w.contacts.map((c) => c.contactId)));
+  if (waves.length) for (const a of d.audience) must(inWaves.has(a.contactId), `contact ${a.contactId} is in no return-date wave`);
   const stop = hardStops(run);
-  for (const m of members) {
-    must(!(m.id && stop.ids.has(m.id)) && !(m.work_email && stop.emails.has(m.work_email.toLowerCase())), `hard-stop contact ${m.id} is in list ${d.listId}`);
-    if (m.id) {
-      const sup = await client.getSuppression(m.id);
-      must(!sup.is_suppressed && !(sup.active_channels ?? []).length, `suppressed contact ${m.id} is in list ${d.listId}`);
+  // Every list a follow-up can send to: the campaign's own, plus one per later return date.
+  const lists = [{ id: d.listId!, members }];
+  for (const w of waves) if (w.slot > 0 && w.listId) lists.push({ id: w.listId, members: await client.listContactsOfList(w.listId) });
+  for (const list of lists) {
+    for (const m of list.members) {
+      must(!(m.id && stop.ids.has(m.id)) && !(m.work_email && stop.emails.has(m.work_email.toLowerCase())), `hard-stop contact ${m.id} is in list ${list.id}`);
+      if (m.id) {
+        const sup = await client.getSuppression(m.id);
+        must(!sup.is_suppressed && !(sup.active_channels ?? []).length, `suppressed contact ${m.id} is in list ${list.id}`);
+      }
     }
   }
   const mark = marker(run.id, g.key);
@@ -502,6 +512,7 @@ async function verifyDraft(runId: string, key: Category): Promise<{ detail: stri
     const problems = await verifyRecordedSequence(client, d);
     must(problems.length === 0, `follow-up sequence: ${problems.join("; ")}`);
     seqNote = `sequence ${d.sequence.sequenceId!.slice(0, 8)}: draft, no sender, ${d.sequence.steps.length} step(s) as recorded`;
+    if (waves.length) seqNote += `; ${waves.length} return-date draft(s) (${waves.map((w) => `${w.key}: ${w.contacts.length}, waits ${w.delayDays}d`).join("; ")}), each list and wait as recorded`;
   }
   return { detail: `campaign ${d.campaignId!.slice(0, 8)} (not launched), audience list ${d.listId} = ${members.length} contact(s), no hard stops, none suppressed; ReplyIQ section in [${sections.join(", ") || "none"}]; ${seqNote}` };
 }

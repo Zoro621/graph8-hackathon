@@ -117,7 +117,7 @@ export interface CampaignDraft {
   docsPending: string[]; // docs still generating when we stopped waiting (patch later)
   docsFailed: string[]; // docs graph8 Studio failed to generate (ReplyIQ fills the ones it owns)
   generation: "complete" | "in_progress" | "unknown";
-  timingNote?: string; // advisory: when to launch (e.g. after OOO return dates)
+  timingNote?: string; // when the first emails go out (out of office: per return date), or advice on when to launch
   /** The follow-up emails, as a graph8 Sequencer DRAFT (no sender attached, never run by ReplyIQ). */
   sequence?: SequenceDraft;
   /** The revised plan across channels (email and calls), built from every channel's evidence. */
@@ -200,9 +200,48 @@ export interface SequenceDraft {
   previewCredits?: number; // graph8's own estimate for the previews
   verified: boolean; // read back from graph8 after creation
   senderAttached: false; // ReplyIQ never attaches a sender: a person does, then launches
+  /**
+   * Out of office: one Sequencer draft per return date (lib/pipeline/returnDates.ts). Slot 0 is this draft's
+   * own list and sequence (above); later dates get a list and a sequence each, with the same steps except how
+   * long step 1 waits after launch.
+   */
+  waves?: SequenceWave[];
+  wavesCountedOn?: string; // YYYY-MM-DD: the day the waits were counted from (a launch that day hits the dates)
   warnings: string[];
   error?: string;
   updatedAt: string;
+}
+
+/** One person in a return-date wave. */
+export interface WaveContact {
+  contactId: number;
+  email: string;
+  threadId: string;
+  returnOn: string | null; // YYYY-MM-DD they are back; null = unknown, treated as back
+  said?: string; // the return date or timing they wrote
+  assumed?: boolean; // no date given: assumed back two weeks after their reply
+}
+
+/** People whose first follow-up email goes out on the same day. */
+export interface ReturnWave {
+  key: string; // "now" (already back: sent on launch) or the first email's date, YYYY-MM-DD
+  returnOn: string | null; // the latest return date in the wave (null for "now")
+  firstEmailOn: string; // YYYY-MM-DD, if launched on the day the waits were counted
+  delayDays: number; // step 1 waits this many days after launch
+  contacts: WaveContact[];
+}
+
+/** A return-date wave as drafted in graph8: its own list and Sequencer draft (slot 0 = the draft's own). */
+export interface SequenceWave extends ReturnWave {
+  slot: number;
+  listId?: number;
+  listTitle?: string;
+  sequenceId?: string;
+  sequenceName?: string;
+  verified: boolean; // read back from graph8: list, steps and step 1's wait as sent
+  /** retired: no one is left for this slot's date (they moved to another wave); its list was emptied, so it can't send. */
+  status: "ready" | "failed" | "retired";
+  error?: string;
 }
 
 /** Suggested additions to company-wide Studio documents, applied only after a person approves. */

@@ -18,6 +18,7 @@ export default function ConfirmDraftModal({
   audience,
   referral,
   hasCard,
+  returnDates = 0,
   balance,
   color,
 }: {
@@ -28,6 +29,7 @@ export default function ConfirmDraftModal({
   audience: number;
   referral: boolean;
   hasCard: boolean;
+  returnDates?: number; // out of office: how many return dates the audience splits into (one Sequencer draft each)
   balance?: number | null;
   color: string;
 }) {
@@ -46,7 +48,13 @@ export default function ConfirmDraftModal({
       icon: Sparkles,
       text: `A Studio campaign with ${hasCard ? "this group's Answer Card" : "these replies, quoted word for word,"} in its Messaging & Objections and Reply Templates docs`,
     },
-    { icon: Mail, text: "A two-step follow-up sequence in the Sequencer, fact-checked, with no sender attached" },
+    {
+      icon: Mail,
+      text:
+        returnDates > 1
+          ? `A two-step follow-up sequence per return date (${returnDates} in the Sequencer), fact-checked, step 1 waiting until each group is back, with no sender attached`
+          : "A two-step follow-up sequence in the Sequencer, fact-checked, with no sender attached",
+    },
     { icon: Coins, text: `About ${DRAFT_CREDITS} credits for Studio's document generation${balance != null ? ` · you have ${Math.round(balance).toLocaleString()}` : ""}` },
   ];
 

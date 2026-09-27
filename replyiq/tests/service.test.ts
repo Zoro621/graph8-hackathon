@@ -294,6 +294,33 @@ describe("rewrite, takeover and V1", () => {
     expect(tasks).toHaveLength(1);
   });
 
+  it("recounting the waits is only for out-of-office drafts with emails; the page gets the return-date split", async () => {
+    const d = deps();
+    const runId = await doneRun(d);
+    const seq = { status: "ready" as const, steps: [], instructions: "", facts: [], doNotClaim: [], originalRules: [], verified: true, senderAttached: false as const, warnings: [], updatedAt: "t" };
+    await withDraft(runId, readyDraft({ sequence: seq }));
+    expect(await startDraft(d, runId, "pricing_request", { action: "retime" }).catch((e) => e)).toMatchObject({ status: 409, message: expect.stringMatching(/Only out-of-office/) });
+
+    const run = (await store.load(runId))!;
+    const away = { ...run.groups[0].replies[0], threadId: "t9", contactId: 109, contactEmail: "t9@example.com", category: "out_of_office" as const, revisitHint: "until October 6", repliedAt: "2026-09-18T10:00:00Z" };
+    run.groups.push({ key: "out_of_office", label: "Out of office", replies: [away], eligible: [{ contactId: 109, email: "t9@example.com", threadId: "t9" }], excluded: [] });
+    await store.save(run);
+    const view = toRunView(run, 2, undefined, {}, null, "2026-09-27");
+    expect(view.groups.find((g) => g.key === "out_of_office")?.returnWaves).toMatchObject([{ key: "2026-10-07", delayDays: 10, contacts: [{ contactId: 109, returnOn: "2026-10-06" }] }]);
+    expect(view.groups.find((g) => g.key === "pricing_request")).not.toHaveProperty("returnWaves");
+
+    const ooo = async (draft: CampaignDraft) => {
+      const r = (await store.load(runId))!;
+      r.groups.find((g) => g.key === "out_of_office")!.draft = draft;
+      await store.save(r);
+    };
+    await ooo(readyDraft());
+    expect(await startDraft(d, runId, "out_of_office", { action: "retime" }).catch((e) => e)).toMatchObject({ status: 409, message: expect.stringMatching(/no follow-up emails to time/) });
+    await ooo(readyDraft({ sequence: seq }));
+    await startDraft(d, runId, "out_of_office", { action: "retime" });
+    expect(tasks).toHaveLength(1);
+  });
+
   it("offers an earlier run's draft of the same campaign, and taking it over marks the earlier copy read-only", async () => {
     const d = deps();
     const older = await doneRun(d);
