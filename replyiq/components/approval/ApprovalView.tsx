@@ -70,7 +70,11 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const takenOver = draft?.supersededBy;
   const previous = draft?.campaignId ? undefined : group.previousDraft;
 
-  const act = async (action: "create" | "patch" | "previews" | "rewrite" | "adopt", label: string) => {
+  const lookup = referral ? group.referralLookup : undefined;
+  const toLookUp = lookup ? Math.max(0, lookup.named - lookup.found) : 0;
+  const enriching = run.job?.kind === "enrich" && run.job.group === groupKey;
+
+  const act = async (action: "create" | "patch" | "previews" | "rewrite" | "adopt" | "enrich", label: string) => {
     setPending(label);
     setActionError(null);
     try {
@@ -211,6 +215,26 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
             <AnimatePresence mode="wait" initial={false}>
               {!draft ? (
                 <m.div key="idle" exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-3">
+                  {referral && lookup && !draftable && toLookUp > 0 && (
+                    <div className="rounded-xl border border-amber/25 bg-amber/[0.05] p-3.5 text-xs leading-relaxed text-muted">
+                      <p>
+                        {lookup.found} of the {lookup.named} named people are in graph8&apos;s CRM. graph8 can look the other {toLookUp} up by name and company (about 2 to 4 credits
+                        each) and add whoever it finds to the CRM. Nothing is added to a list yet, and the person who left is never contacted.
+                      </p>
+                      {lookup.enrichedAt && <p className="mt-1.5 text-dim">Last looked up {timeAgo(Date.parse(lookup.enrichedAt), now)}: {lookup.created ?? 0} added.</p>}
+                      <div className="mt-3">
+                        {enriching || pending === "enrich" ? (
+                          <Button variant="ghost" disabled className="w-full">
+                            <Loader2 className="size-4 animate-spin" /> Looking them up in graph8…
+                          </Button>
+                        ) : (
+                          <HoldButton onConfirm={() => void act("enrich", "enrich")} disabled={busyElsewhere || Boolean(writeBlocked) || Boolean(pending)} className="w-full">
+                            Hold to look up {toLookUp} {toLookUp === 1 ? "person" : "people"} in graph8
+                          </HoldButton>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {previous && (
                     <div className="flex flex-col gap-3 rounded-xl border border-iris/30 bg-iris/[0.05] p-3.5">
                       <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">

@@ -47,7 +47,7 @@ export function parsePersonNames(referred: string | undefined): string[] {
 
 /** How two person names are compared (case and spacing ignored). Also used by the API preflight. */
 export const nameKey = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
-const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
+export const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
 
 type DraftClient = SequenceClient &
   Pick<

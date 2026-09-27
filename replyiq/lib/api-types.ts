@@ -51,7 +51,7 @@ export type LearningsView = Omit<StudioLearnings, "proposals"> & {
   proposals: Omit<StudioLearnings["proposals"][number], "backup">[];
 };
 
-export type JobKind = "pipeline" | "draft" | "learnings";
+export type JobKind = "pipeline" | "draft" | "learnings" | "enrich";
 export interface JobView {
   kind: JobKind;
   group?: Category;

@@ -102,6 +102,13 @@ export interface ContactListItem {
   company_id: number | null;
 }
 
+/** POST /enrichment/lookup/{person,company}: `data` is provider-shaped (email / work_email, domain, job_title, linkedin_url). */
+export interface LookupResult {
+  found: boolean;
+  confidence?: number;
+  data?: Record<string, unknown> | null;
+}
+
 export interface SuppressionStatus {
   contact_id: number;
   is_suppressed: boolean;
@@ -554,6 +561,15 @@ export function createG8Client(opts: G8ClientOptions) {
       const { data } = await getPage<ContactListItem>("/contacts", { ...q, limit: q.limit ?? 25 });
       return data;
     },
+
+    // ---------- paid lookups (guarded by write(): they spend credits, and only run after a person holds the button) ----------
+    /** POST /enrichment/lookup/company by name: the company's domain. About 1-2 credits. */
+    lookupCompany: (name: string) => client.write<LookupResult>("POST", "/enrichment/lookup/company", { name }),
+    /** POST /enrichment/lookup/person by name + company domain: the person's work email. About 1-2 credits. */
+    lookupPerson: (q: { first_name: string; last_name: string; company_domain: string }) => client.write<LookupResult>("POST", "/enrichment/lookup/person", q),
+    /** POST /contacts: a CRM contact (no list). Idempotent per email. */
+    createContact: (body: { first_name: string; last_name: string; work_email: string; company_domain?: string; job_title?: string; linkedin_url?: string }) =>
+      client.write<ContactListItem>("POST", "/contacts", body, `replyiq-contact:${body.work_email.toLowerCase()}`),
     createCampaign: (body: CampaignCreateBody, idempotencyKey?: string) =>
       client.write<CampaignCreated>("POST", "/campaigns", body, idempotencyKey),
     getCampaign: (id: string) => get<{ id: string; name: string; status: string | null; documents?: { id: string; name?: string; type?: string }[] }>(`/campaigns/${encodeURIComponent(id)}`),

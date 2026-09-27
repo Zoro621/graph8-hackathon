@@ -11,6 +11,7 @@ import type { CampaignDraft, Category, Group, Run, SourceSummary, StudioLearning
 import { emptyRun, runPipeline } from "../pipeline/runPipeline";
 import { discoverSources } from "../pipeline/sources";
 import { DraftError, draftCampaign, nameKey, parsePersonNames } from "../pipeline/draftCampaign";
+import { enrichAndRecount } from "../pipeline/referralEnrich";
 import { toPlainText } from "../pipeline/fetchReplies";
 import { LearningsError, applyLearnings, proposeLearnings, removeLearnings } from "../pipeline/studioLearnings";
 import {
@@ -301,7 +302,7 @@ export const DraftBody = z
      * previews: graph8 drafts step 1 for a few contacts. rewrite: re-write the follow-up emails (and the channel plan)
      * in the same Sequencer draft. adopt: take over an earlier run's draft of this group (`fromRunId`) instead of creating one.
      */
-    action: z.enum(["create", "patch", "previews", "rewrite", "adopt"]).default("create"),
+    action: z.enum(["create", "patch", "previews", "rewrite", "adopt", "enrich"]).default("create"),
     previews: z.number().int().min(0).max(3).default(0),
     fromRunId: z.string().regex(/^[a-z0-9]{12}$/).optional(),
   })
@@ -321,6 +322,27 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
     throw new ApiError(409, "not_possible", categoryInfo(groupKey).followUp === "rep" ? `"${group.label}" goes to a rep, not a follow-up campaign` : `"${group.label}" is never re-contacted, so it gets no follow-up campaign`);
   if (run.steps.resolve !== "done") throw new ApiError(409, "not_possible", "The run's audience was not resolved; run the analysis again first");
   if (group.draft?.supersededBy) throw new ApiError(409, "taken_over", `A newer run (${group.draft.supersededBy}) took this draft over; continue there`);
+  if (input.action === "enrich") {
+    // Referrals only: look the named people up in graph8 (paid, ~2-4 credits each) and add them to the CRM, so
+    // the draft has someone to reach. Approved by the hold on the page; nothing is added to a list here.
+    if (groupKey !== "referral_wrong_person") throw new ApiError(409, "not_possible", "Only referral groups have named people to look up");
+    await assertSameOrg(deps, run);
+    await deps.g8.assertWriteAllowed();
+    if (!(await lock(deps).claim(runId, "enrich", groupKey))) throw new ApiError(409, "busy", "Another job is already working on this run");
+    deps.schedule(async () => {
+      try {
+        const result = await enrichAndRecount(deps.g8, group, deps.log);
+        deps.log?.(`  referral: ${result.created.length} contact(s) added after ${result.lookups} lookup(s)`);
+      } catch (err) {
+        group.referralLookup = { found: group.referralLookup?.found ?? 0, named: group.referralLookup?.named ?? 0, notes: [`lookup failed: ${describeError(err)}`], enrichedAt: new Date().toISOString() };
+      } finally {
+        run.updatedAt = new Date().toISOString();
+        await deps.store.save(run).catch(() => {});
+        await lock(deps).release(runId);
+      }
+    });
+    return { runId, group: groupKey };
+  }
   const fresh = input.action === "create" || input.action === "adopt";
   if (!fresh && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
   if (input.action === "rewrite" && group.draft?.sequence?.status !== "ready") throw new ApiError(409, "not_possible", "This draft has no follow-up emails to rewrite yet");

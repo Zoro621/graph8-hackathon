@@ -99,7 +99,7 @@ export interface Group {
   themes?: Theme[]; // only for groups with 2+ replies; absent if theme discovery failed
   card?: AnswerCard;
   /** Referral groups: the named people looked up in the CRM during the run (read-only), so the page can say before the hold who can actually be reached. */
-  referralLookup?: { found: number; named: number; notes: string[] };
+  referralLookup?: { found: number; named: number; notes: string[]; enrichedAt?: string; created?: number };
   draft?: CampaignDraft;
 }
 
