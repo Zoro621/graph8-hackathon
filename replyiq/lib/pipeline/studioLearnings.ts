@@ -81,7 +81,7 @@ export function messagingBlock(run: Run, groups: Group[], date: string): string 
     const card = g.card!;
     lines.push("", `### ${g.label} (${plural(g.replies.length, "reply", "replies")})`, ...quotesOf(g, 3).map((q) => `> "${q.slice(0, 220)}"`), "", `**How to answer:** ${oneLine(card.howToAnswer)}`);
     if (card.proofWeHave.length) lines.push("", "**Proof to use:**", ...card.proofWeHave.map((p) => `- ${oneLine(p.claim).replace(/[.;:,]+$/, "")}: "${oneLine(p.excerpt)}" (${p.sourceDocName})`));
-    if (card.proofGap) lines.push("", `**Don't claim (no proof yet):** ${oneLine(card.proofGap)}`);
+    if (card.proofGap) lines.push("", `**No proof yet for:** ${oneLine(card.proofGap)} (do not fill this gap with a guess)`);
   }
   return lines.join("\n");
 }

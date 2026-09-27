@@ -11,6 +11,7 @@ import { groupReplies } from "./group";
 import { discoverThemes } from "./themes";
 import { loadChannels } from "./channels";
 import { resolveContacts } from "./resolveContacts";
+import { nameKey, parsePersonNames, referralTargets } from "./draftCampaign";
 import { generateCards, wantsCard } from "./cards";
 import type { SourceDoc } from "./retrieve";
 import { tagThreads } from "./tagThreads";
@@ -173,6 +174,19 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
       run.audience = { eligible: res.eligible, excluded: res.excluded };
       run.errors.push(...res.warnings.map((w) => `resolve: ${w}`));
       log(`  eligible ${res.eligible}, excluded ${JSON.stringify(res.excluded)}`);
+      // Referrals go to the people named in the replies. Look them up in the CRM now (read-only), so the
+      // page can say who can actually be reached before anyone holds the draft button. Non-critical.
+      const referral = run.groups.find((g) => g.key === "referral_wrong_person");
+      if (referral) {
+        const named = new Set(referral.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size;
+        try {
+          const { found, notes } = await referralTargets(deps.g8, referral);
+          referral.referralLookup = { found: found.length, named, notes };
+          log(`  referral: ${found.length} of ${named} named people found in the CRM`);
+        } catch (err) {
+          run.errors.push(`resolve: referral lookup failed (${describeError(err)})`);
+        }
+      }
     });
 
     // Answer Cards for objection / interest groups. Non-critical: failures become warnings.

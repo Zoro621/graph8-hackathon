@@ -563,8 +563,12 @@ export function createG8Client(opts: G8ClientOptions) {
     },
     getCampaignDoc: (id: string, docId: string) =>
       get<CampaignDocument>(`/campaigns/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`),
-    updateCampaignDoc: (id: string, docId: string, content: string) =>
-      client.write<CampaignDocument>("PUT", `/campaigns/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, { content }),
+    /**
+     * PUT the document's text. `status` is the document's Studio status: a document graph8's generator left
+     * `failed` keeps that badge even after ReplyIQ fills it, unless the write says it is now `completed`.
+     */
+    updateCampaignDoc: (id: string, docId: string, content: string, status?: "completed") =>
+      client.write<CampaignDocument>("PUT", `/campaigns/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, { content, ...(status ? { status } : {}) }),
 
     // ---------- Studio campaigns ----------
     async listCampaigns(): Promise<CampaignListItem[]> {

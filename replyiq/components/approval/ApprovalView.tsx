@@ -177,8 +177,11 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                 <p className="flex items-center gap-1.5 text-xs text-muted">
                   <Coins className="size-3.5" /> Draft cost
                 </p>
-                <p className="mt-1 text-3xl font-semibold tabular-nums">~{DRAFT_CREDITS}</p>
-                <p className="text-[11px] text-dim">{status?.credits != null ? `${Math.round(status.credits).toLocaleString()} credits left` : "credits, Studio docs"}</p>
+                <p className="mt-1 text-3xl font-semibold tabular-nums">{previous || draft?.adoptedFrom ? "0" : `~${DRAFT_CREDITS}`}</p>
+                <p className="text-[11px] text-dim">
+                  {previous || draft?.adoptedFrom ? "takeover: no new Studio docs" : "for Studio docs"}
+                  {status?.credits != null ? ` · ${Math.round(status.credits).toLocaleString()} credits left` : ""}
+                </p>
               </div>
             </div>
             {(revisit.length > 0 || draft?.timingNote) && (
@@ -215,7 +218,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                         <span>
                           An <Link href={`/runs/${previous.runId}/groups/${groupKey}`} className="text-iris hover:underline">earlier run</Link> already drafted this follow-up
                           {previous.campaignName ? ` (“${previous.campaignName}”)` : ""}, {timeAgo(Date.parse(previous.updatedAt), now)}. Update it with this run&apos;s evidence: the same list, campaign and
-                          sequence, with the Answer Card and emails replaced. No new Studio documents, so no ~{DRAFT_CREDITS} credits.
+                          sequence, with the {group.card ? "Answer Card and " : ""}emails replaced. No new Studio documents, so no ~{DRAFT_CREDITS} credits.
                         </span>
                       </p>
                       {pending === "adopt" ? (
@@ -230,7 +233,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                     </div>
                   )}
                   <p className="text-sm leading-relaxed text-muted">
-                    {previous ? "Or create a separate new draft: " : ""}Creates the audience list, a Studio campaign carrying this Answer Card, and fact-checked follow-up emails. You approve before anything is created.
+                    {previous ? "Or create a separate new draft: " : ""}Creates the audience list, a Studio campaign{group.card ? " carrying this Answer Card" : ""}, and fact-checked follow-up emails. You approve before anything is created.
                   </p>
                   <Button variant={previous ? "ghost" : "iris"} magnetic disabled={!draftable || busyElsewhere || Boolean(writeBlocked) || Boolean(pending)} onClick={() => setConfirm(true)} className="w-full">
                     {pending === "create" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {previous ? "Create a new draft instead" : "Draft follow-up in graph8"}
@@ -281,9 +284,16 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
                           <RefreshCcw className="size-3.5" /> {draft.campaignId ? "Resume" : "Try again"}
                         </Button>
                       )}
-                      {draft.status === "ready" && draft.docsPending.length > 0 && (
-                        <Button variant="ghost" onClick={() => act("patch", "patch")} disabled={busyElsewhere || Boolean(pending)} className="!px-3.5 !py-2 text-xs">
-                          {pending === "patch" ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />} Add the card to {draft.docsPending.length} late doc{draft.docsPending.length === 1 ? "" : "s"}
+                      {draft.status === "ready" && (draft.docsPending.length > 0 || draft.generation !== "complete") && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => act("patch", "patch")}
+                          disabled={busyElsewhere || Boolean(pending)}
+                          className="!px-3.5 !py-2 text-xs"
+                          title="Re-checks Studio's documents and writes the Answer Card into any that are finished but still missing it. No credits."
+                        >
+                          {pending === "patch" ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}{" "}
+                          {draft.docsPending.length > 0 ? `Add the card to ${draft.docsPending.length} late doc${draft.docsPending.length === 1 ? "" : "s"}` : "Re-check Studio's docs"}
                         </Button>
                       )}
                       {draft.status === "ready" && draft.sequence?.status === "ready" && (

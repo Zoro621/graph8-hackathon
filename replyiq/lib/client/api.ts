@@ -24,7 +24,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(0, "network", "Can't reach the ReplyIQ server");
   }
   const text = await res.text();
-  const json = text ? (JSON.parse(text) as unknown) : null;
+  let json: unknown = null;
+  try {
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // Not JSON: the dev server's HTML 404/500 page, or a proxy page. Say so instead of "Unexpected token '<'".
+    throw new ApiError(res.status, "not_json", `The server answered with a page, not data (HTTP ${res.status}). Reload the app; if it persists, restart the server.`);
+  }
   if (!res.ok) {
     const e = (json as ApiErrorBody | null)?.error;
     throw new ApiError(res.status, e?.code ?? "http_error", e?.message ?? `Request failed (${res.status})`);
@@ -133,8 +139,27 @@ export const useSources = (enabled = true) => useResource<SourceSummary[]>(enabl
 export const useRunSummaries = (enabled = true) =>
   useResource<RunSummary[]>(enabled ? keys.runs : null, (d) => (d?.some((r) => r.status === "running" || r.job) ? 4000 : 0));
 
-/** One run; polls every 1.5 s while the pipeline, a draft or learnings job is working on it. */
-export const useRunView = (id: string | null) => useResource<RunView>(id ? keys.run(id) : null, (d) => (isWorking(d) ? 1500 : 0));
+/**
+ * One run; polls every 1.5 s while the pipeline, a draft or learnings job is working on it. A run that has
+ * just been reported as interrupted keeps polling for a few seconds: a job's last save and the release of its
+ * lock are not one instant, so the first "interrupted" can be a job that is finishing, not one that died.
+ */
+export const useRunView = (id: string | null) =>
+  useResource<RunView>(id ? keys.run(id) : null, (d) => (isWorking(d) ? 1500 : d && recentlyInterrupted(d) ? 2000 : 0));
+
+const INTERRUPTED_GRACE_POLLS = 4; // 4 more polls at 2 s = 8 s of grace
+const interruptedPolls = new Map<string, { n: number; last: RunView }>();
+function recentlyInterrupted(run: RunView): boolean {
+  if (!run.interrupted) {
+    interruptedPolls.delete(run.id);
+    return false;
+  }
+  // Counted per response (same object = same poll), not per render.
+  const prev = interruptedPolls.get(run.id);
+  const n = prev ? (prev.last === run ? prev.n : prev.n + 1) : 1;
+  interruptedPolls.set(run.id, { n, last: run });
+  return n <= INTERRUPTED_GRACE_POLLS;
+}
 
 /** The run's original sequence (V1), read live from graph8 once per view. */
 export const useOriginal = (id: string | null) => useResource<OriginalView>(id ? keys.original(id) : null);

@@ -70,11 +70,22 @@ export function toApiError(err: unknown): ApiError {
 
 // ---------- status ----------
 
+// graph8's usage endpoint can take many seconds; the balance is cached briefly so pages show it at once.
+const CREDITS_TTL_MS = 60_000;
+const creditsCache = new WeakMap<object, { at: number; credits: number }>(); // per graph8 client
+async function creditsLeft(deps: ServiceDeps): Promise<number | null> {
+  const hit = creditsCache.get(deps.g8);
+  if (hit && Date.now() - hit.at < CREDITS_TTL_MS) return hit.credits;
+  const usage = await deps.g8.getUsage().catch(() => null);
+  const credits = usage ? (usage.available_credits ?? usage.credits ?? null) : null;
+  if (credits != null) creditsCache.set(deps.g8, { at: Date.now(), credits });
+  return credits ?? hit?.credits ?? null;
+}
+
 export async function getStatus(deps: ServiceDeps): Promise<StatusView> {
   const base = { configured: true, missing: [], launchEnabled: deps.env.ENABLE_LAUNCH, minGroupSize: deps.env.MIN_GROUP_SIZE };
   try {
-    const [write, usage] = await Promise.all([deps.g8.writePolicy(), deps.g8.getUsage().catch(() => null)]);
-    const credits = usage ? (usage.available_credits ?? usage.credits ?? null) : null;
+    const [write, credits] = await Promise.all([deps.g8.writePolicy(), creditsLeft(deps)]);
     return { ...base, write, credits };
   } catch (err) {
     return { ...base, error: describeError(err) };
@@ -194,14 +205,20 @@ const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefin
  */
 export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, min: number, org?: string): Draftability {
   const referral = g.key === "referral_wrong_person";
-  const targets = referral
-    ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size
-    : g.eligible.length;
+  // Referrals: the run's CRM lookup when it ran (who can actually be reached), else the names as an upper bound.
+  const named = referral ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size : 0;
+  const targets = referral ? (g.referralLookup?.found ?? named) : g.eligible.length;
   if (!allowsFollowUpCampaign(g.key)) return { ok: false, targets, reason: `${g.label} never gets a follow-up campaign` };
   if (fromOtherOrg(run, org)) return { ok: false, targets, reason: OTHER_ORG_REASON };
   if (run.steps.resolve !== "done") return { ok: false, targets, reason: "The audience has not been checked yet" };
-  if (targets < min)
-    return { ok: false, targets, reason: referral ? `Needs at least ${min} named people to look up; the replies name ${targets}` : `Needs at least ${min} eligible contacts; this group has ${targets}` };
+  if (targets < min) {
+    const reason = !referral
+      ? `Needs at least ${min} eligible contacts; this group has ${targets}`
+      : g.referralLookup
+        ? `Needs at least ${min} named people in the CRM; ${targets} of the ${g.referralLookup.named} named are there (the rest would need an enrichment lookup, which costs credits and needs approval)`
+        : `Needs at least ${min} named people to look up; the replies name ${targets}`;
+    return { ok: false, targets, reason };
+  }
   return { ok: true, targets };
 }
 
@@ -243,9 +260,13 @@ export async function previousDrafts(deps: ServiceDeps, run: Run): Promise<Parti
 }
 
 export async function getRunView(deps: ServiceDeps, id: string): Promise<RunView> {
+  // The lock is read BEFORE the run file. A job releases its lock only after its last save, so reading the
+  // lock first can never pair a "drafting" file with "no job"; the other order did (the scan of earlier runs
+  // between the two reads took about a second), and the page then froze on a false "interrupted".
+  const job = await lock(deps).active(id);
   const run = await loadRun(deps, id);
   const org = await keyOrg(deps);
-  return toRunView(run, deps.env.MIN_GROUP_SIZE, org, fromOtherOrg(run, org) ? {} : await previousDrafts(deps, run), await lock(deps).active(run.id));
+  return toRunView(run, deps.env.MIN_GROUP_SIZE, org, fromOtherOrg(run, org) ? {} : await previousDrafts(deps, run), job);
 }
 
 /** Recent runs of the org the key opens. Runs saved with another key stay reachable by URL, read-only. */
@@ -389,13 +410,16 @@ export async function getOriginal(deps: ServiceDeps, runId: string): Promise<Ori
           .map((step) => {
             const data = (step.step_data ?? {}) as Record<string, unknown>;
             const instructions = typeof data.instructions === "string" ? data.instructions.trim() : "";
-            const ai = step.input_type === "ON_DEMAND" || Boolean(instructions);
+            const body = toPlainText(typeof data.body === "string" ? data.body : "");
+            // Only ON_DEMAND steps are written by graph8's AI. A fixed-text step can carry a note in
+            // `instructions` too (the [DEMO] steps do); that note is not the email.
+            const ai = step.input_type === "ON_DEMAND";
             return {
               order: Number(step.step_order ?? 0),
               day: Math.round(Number(step.time_interval ?? 0) / 86_400),
               kind: ai ? ("ai" as const) : ("template" as const),
               ...(typeof data.subject === "string" && data.subject.trim() ? { subject: data.subject.trim() } : {}),
-              text: (ai ? instructions : toPlainText(typeof data.body === "string" ? data.body : "")).slice(0, 6_000),
+              text: (ai ? instructions || body : body || instructions).slice(0, 6_000),
             };
           })
           .sort((a, b) => a.order - b.order);

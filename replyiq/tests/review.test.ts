@@ -29,6 +29,15 @@ describe("draftability (same rules as the draft)", () => {
     expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin"), reply("kurt huegin")]), 2).ok).toBe(false);
     expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin"), reply("Rob Moore")]), 2)).toMatchObject({ ok: true, targets: 2 });
   });
+  it("referrals: once the run looked the names up in the CRM, only the people found count, and the reason says why", () => {
+    const g = group("referral_wrong_person", [reply("Kurt Huegin"), reply("Rob Moore")]);
+    g.referralLookup = { found: 0, named: 2, notes: ["Kurt Huegin: not in the CRM yet"] };
+    const d = draftability(done, g, 2);
+    expect(d).toMatchObject({ ok: false, targets: 0 });
+    expect(d.reason).toContain("0 of the 2 named are there");
+    g.referralLookup = { found: 2, named: 2, notes: [] };
+    expect(draftability(done, g, 2)).toMatchObject({ ok: true, targets: 2 });
+  });
   it("other groups need enough eligible contacts, a follow-up category and a resolved audience", () => {
     expect(draftability(done, group("pricing_request", [], 2), 2).ok).toBe(true);
     expect(draftability(done, group("pricing_request", [], 1), 2).ok).toBe(false);
