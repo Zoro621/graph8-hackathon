@@ -37,7 +37,7 @@ export default function StateNotice({
         <>
           <p className="text-sm leading-relaxed text-muted">
             ReplyIQ only shows real data from your graph8 org. Add these keys to <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-xs text-text">replyiq/.env.local</code>{" "}
-            and restart the server.
+            and restart the server. On Vercel, add them under Project Settings → Environment Variables, connect Upstash Redis from the Marketplace, and redeploy.
           </p>
           <pre className="w-full overflow-x-auto rounded-xl border border-line bg-ink-2 p-4 text-left font-mono text-xs leading-relaxed text-muted">{ENV_LINES.join("\n")}</pre>
           <p className="text-xs text-dim">The full list of variables is in replyiq/README.md. Keys stay on the server and never reach the browser.</p>
