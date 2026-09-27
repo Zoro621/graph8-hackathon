@@ -1,7 +1,6 @@
 // UI metadata for the reply categories, derived from the shared taxonomy (lib/taxonomy.ts).
 import { CATEGORIES, allowsFollowUpCampaign, categoryInfo, isHardStop, tagNameOf } from "../taxonomy";
 import type { Category } from "../types";
-import type { GroupView } from "../api-types";
 
 /** Category hues, tuned for a near-black background. */
 export const CATEGORY_COLOR: Record<Category, string> = {
@@ -64,9 +63,5 @@ export function meta(key: Category): CategoryMeta {
 }
 
 export const ALL_CATEGORIES = CATEGORIES.map((c) => c.key);
-
-/** A group can get a follow-up campaign when its category allows one and enough people are eligible (referrals: the named people). */
-export const canDraftGroup = (g: GroupView, min: number) =>
-  allowsFollowUpCampaign(g.key) && (g.key === "referral_wrong_person" ? g.replies.some((r) => r.referredName) : g.eligible.length >= min);
 
 export const hexToRgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(",");

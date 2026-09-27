@@ -13,9 +13,9 @@ import AnswerCardView from "./AnswerCardView";
 import LearningsPanel from "./LearningsPanel";
 import StateNotice from "../shell/StateNotice";
 import { Button, Chip, Counter, Eyebrow } from "../ui/primitives";
-import { api, isWorking, useRunView, useStatus } from "@/lib/client/api";
+import { api, isWorking, useRunView } from "@/lib/client/api";
 import { useNow } from "@/lib/client/hooks";
-import { canDraftGroup, meta } from "@/lib/ui/categories";
+import { meta } from "@/lib/ui/categories";
 import { clockTime, displayName } from "@/lib/ui/format";
 import { runLog } from "@/lib/ui/runLog";
 import { STEP_ORDER } from "@/lib/ui/theme";
@@ -49,7 +49,6 @@ function useOrbs(run: Run | undefined) {
 export default function RunView({ runId }: { runId: string }) {
   const router = useRouter();
   const { data: run, error, loading } = useRunView(runId);
-  const { data: status } = useStatus();
   const [hl, setHl] = useState<Category | null>(null);
   const [openCard, setOpenCard] = useState<Category | null>(null);
   const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -66,7 +65,6 @@ export default function RunView({ runId }: { runId: string }) {
     return <RunSkeleton />;
   }
 
-  const minGroup = status?.minGroupSize ?? 2;
   const finished = STEP_ORDER.filter((s) => ["done", "skipped", "failed"].includes(run.steps[s])).length;
   const progress = run.status === "running" ? finished / STEP_ORDER.length : 1;
   const started = Date.parse(run.createdAt);
@@ -76,7 +74,7 @@ export default function RunView({ runId }: { runId: string }) {
   const guarded = run.steps.resolve === "done";
   const cardsPending = run.steps.cards === "running" || run.steps.cards === "pending";
   const excludedTotal = run.groups.reduce((a, g) => a + g.excluded.length, 0);
-  const draftable = run.groups.filter((g) => canDraftGroup(g, minGroup)).sort((a, b) => (b.card?.proofWeHave.length ?? -1) - (a.card?.proofWeHave.length ?? -1));
+  const draftable = run.groups.filter((g) => g.draftable.ok).sort((a, b) => (b.card?.proofWeHave.length ?? -1) - (a.card?.proofWeHave.length ?? -1));
   const tipReply = tip ? replies.find((r) => r.threadId === tip.id) : null;
   const openGroup = openCard ? run.groups.find((g) => g.key === openCard) : null;
 
@@ -259,7 +257,7 @@ export default function RunView({ runId }: { runId: string }) {
                     runId={run.id}
                     guarded={guarded}
                     cardsPending={cardsPending}
-                    draftable={guarded && canDraftGroup(g, minGroup)}
+                    draftable={g.draftable.ok}
                     highlighted={hl === g.key}
                     onHover={(on) => setHl(on ? g.key : null)}
                     onOpenCard={() => setOpenCard(g.key)}
@@ -322,7 +320,7 @@ export default function RunView({ runId }: { runId: string }) {
               </h2>
             </div>
             <AnswerCardView card={openGroup.card} color={meta(openGroup.key).color} themes={openGroup.themes} />
-            {guarded && canDraftGroup(openGroup, minGroup) && (
+            {openGroup.draftable.ok && (
               <Link href={`/runs/${run.id}/groups/${openGroup.key}`} className="self-start">
                 <Button variant="primary" magnetic>
                   Review & draft follow-up <ArrowRight className="size-4" />
