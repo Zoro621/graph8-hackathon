@@ -16,7 +16,7 @@ export default function AgentStrip() {
         transition={{ type: "spring", stiffness: 120, damping: 20 }}
         aria-hidden
       />
-      <ol className="relative grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+      <ol className="relative grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-7">
         {STEP_ORDER.map((k, i) => {
           const meta = STEP_META[k];
           const on = active != null && i <= active;

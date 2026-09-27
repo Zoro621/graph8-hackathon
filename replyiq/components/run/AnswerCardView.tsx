@@ -1,7 +1,7 @@
 "use client";
 import { m } from "motion/react";
-import { AlertTriangle, BadgeCheck, FileText, MessageSquareQuote, Target, XCircle } from "lucide-react";
-import type { AnswerCard } from "@/lib/types";
+import { AlertTriangle, BadgeCheck, BookOpen, FileText, MessageSquareQuote, Network, Target, XCircle } from "lucide-react";
+import type { AnswerCard, Theme } from "@/lib/types";
 
 const item = {
   hidden: { opacity: 0, y: 10 },
@@ -19,18 +19,16 @@ function Section({ icon: Icon, title, children, tone = "text-muted" }: { icon: t
   );
 }
 
+// The backend appends rejected claims to the gap text; they are shown separately (struck out) instead.
+export const UNVERIFIED_NOTE = /\s*Unverified \(not found in the documents\):[\s\S]*$/;
+
 /** The Answer Card, with the grounding check made visible: verified proofs tick in, rejected claims strike out. */
-export default function AnswerCardView({ card, color }: { card: AnswerCard; color: string }) {
-  const gapLines = (card.proofGap ?? "").split("\n").filter(Boolean);
-  const rejected = gapLines.filter((l) => l.startsWith("Unverified: "));
-  const gaps = gapLines.filter((l) => !l.startsWith("Unverified: "));
+export default function AnswerCardView({ card, color, themes }: { card: AnswerCard; color: string; themes?: Theme[] }) {
+  const gap = card.proofGap?.replace(UNVERIFIED_NOTE, "").trim() || null;
+  const themeSize = new Map((themes ?? []).map((t) => [t.id, t.threadIds.length]));
+  const quotes = [...new Set(card.quotes)]; // the backend's fallback quotes can repeat
   return (
-    <m.div
-      className="flex flex-col gap-7"
-      initial="hidden"
-      animate="show"
-      variants={{ show: { transition: { staggerChildren: 0.09 } } }}
-    >
+    <m.div className="flex flex-col gap-7" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.09 } } }}>
       <m.p variants={item} className="text-xl leading-snug tracking-tight text-text sm:text-2xl">
         <span className="font-serif italic" style={{ color }}>
           “
@@ -38,60 +36,49 @@ export default function AnswerCardView({ card, color }: { card: AnswerCard; colo
         {card.summary}
       </m.p>
 
-      <Section icon={MessageSquareQuote} title="What they said">
-        <div className="flex flex-wrap gap-2">
-          {[...new Set(card.quotes)].map((q) => (
-            <span key={q} className="rounded-lg border border-line bg-white/[0.03] px-3 py-1.5 text-sm text-text">
-              “{q}” {card.quotes.filter((x) => x === q).length > 1 && <span className="font-mono text-xs text-dim">×{card.quotes.filter((x) => x === q).length}</span>}
-            </span>
-          ))}
-        </div>
-      </Section>
+      {quotes.length > 0 && (
+        <Section icon={MessageSquareQuote} title="What they said">
+          <div className="flex flex-wrap gap-2">
+            {quotes.map((q) => (
+              <span key={q} className="rounded-lg border border-line bg-white/[0.03] px-3 py-1.5 text-sm text-text">
+                “{q}”
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section icon={BadgeCheck} title={`Proof we have · ${card.proofWeHave.length} grounded`} tone="text-aqua">
         <ul className="flex flex-col gap-2.5">
           {card.proofWeHave.map((p, i) => (
-            <m.li
-              key={p.excerpt}
-              variants={item}
-              className="group relative overflow-hidden rounded-xl border border-aqua/15 bg-aqua/[0.04] p-3.5"
-            >
-              <m.span
-                className="absolute inset-y-0 left-0 w-0.5 bg-aqua"
-                initial={{ scaleY: 0 }}
-                animate={{ scaleY: 1 }}
-                transition={{ delay: 0.4 + i * 0.15, duration: 0.5 }}
-              />
+            <m.li key={p.excerpt} variants={item} className="group relative overflow-hidden rounded-xl border border-aqua/15 bg-aqua/[0.04] p-3.5">
+              <m.span className="absolute inset-y-0 left-0 w-0.5 bg-aqua" initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ delay: 0.4 + i * 0.15, duration: 0.5 }} />
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-medium text-text">{p.claim}</p>
-                <span className="flex shrink-0 items-center gap-1 rounded-md border border-aqua/25 px-1.5 py-0.5 font-mono text-[10px] text-aqua">
-                  <FileText className="size-3" /> {p.sourceDocName}
+                <span className="flex max-w-[45%] shrink-0 items-center gap-1 truncate rounded-md border border-aqua/25 px-1.5 py-0.5 font-mono text-[10px] text-aqua">
+                  <FileText className="size-3 shrink-0" /> <span className="truncate">{p.sourceDocName}</span>
                 </span>
               </div>
               <p className="mt-2 border-l border-line-2 pl-3 text-[13px] italic leading-relaxed text-muted">
                 …<mark className="rounded bg-aqua/15 px-0.5 not-italic text-aqua">{p.excerpt}</mark>…
               </p>
               <p className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-dim">
-                <BadgeCheck className="size-3 text-aqua" /> excerpt found word for word in {p.sourceDocName}
+                <BadgeCheck className="size-3 text-aqua" /> found word for word in the document
               </p>
             </m.li>
           ))}
-          {card.proofWeHave.length === 0 && <li className="text-sm text-dim">No grounded proof in Studio for this objection.</li>}
+          {card.proofWeHave.length === 0 && <li className="text-sm text-dim">No grounded proof in the company&apos;s documents for this objection.</li>}
         </ul>
       </Section>
 
-      {(gaps.length > 0 || rejected.length > 0) && (
+      {(gap || card.unverifiedClaims.length > 0) && (
         <Section icon={AlertTriangle} title="Proof gap" tone="text-amber">
           <div className="rounded-xl border border-amber/25 bg-amber/[0.05] p-3.5">
-            {gaps.map((g) => (
-              <p key={g} className="text-sm leading-relaxed text-amber">
-                ⚠ {g}
-              </p>
-            ))}
-            {rejected.map((r, i) => (
+            {gap && <p className="text-sm leading-relaxed text-amber">⚠ {gap}</p>}
+            {card.unverifiedClaims.map((r, i) => (
               <m.div
                 key={r}
-                className="mt-3 flex items-start gap-2 rounded-lg border border-rose/20 bg-rose/[0.05] p-2.5"
+                className="mt-3 flex items-start gap-2 rounded-lg border border-rose/20 bg-rose/[0.05] p-2.5 first:mt-0"
                 initial={{ opacity: 0, x: 16 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.9 + i * 0.15 }}
@@ -99,15 +86,10 @@ export default function AnswerCardView({ card, color }: { card: AnswerCard; colo
                 <XCircle className="mt-0.5 size-3.5 shrink-0 text-rose" />
                 <div>
                   <p className="relative inline text-[13px] text-muted">
-                    {r.replace("Unverified: ", "")}
-                    <m.span
-                      className="absolute left-0 top-1/2 h-px w-full origin-left bg-rose"
-                      initial={{ scaleX: 0 }}
-                      animate={{ scaleX: 1 }}
-                      transition={{ delay: 1.2 + i * 0.15, duration: 0.5 }}
-                    />
+                    {r}
+                    <m.span className="absolute left-0 top-1/2 h-px w-full origin-left bg-rose" initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ delay: 1.2 + i * 0.15, duration: 0.5 }} />
                   </p>
-                  <p className="mt-1 font-mono text-[10px] text-rose/80">rejected by grounding check · excerpt not found in the cited doc</p>
+                  <p className="mt-1 font-mono text-[10px] text-rose/80">rejected by the grounding check · excerpt not found in the cited document</p>
                 </div>
               </m.div>
             ))}
@@ -123,6 +105,34 @@ export default function AnswerCardView({ card, color }: { card: AnswerCard; colo
           <p className="rounded-xl border border-lime/20 bg-lime/[0.04] p-3 text-sm leading-relaxed text-text/90">{card.emailAngle}</p>
         </Section>
       </div>
+
+      {card.themeNotes.length > 0 && (
+        <Section icon={Network} title="By theme">
+          <ul className="flex flex-col gap-2">
+            {card.themeNotes.map((n) => (
+              <li key={n.themeId} className="rounded-xl border border-line bg-white/[0.02] p-3">
+                <p className="flex items-center justify-between gap-2 text-sm font-medium text-text">
+                  {n.label}
+                  {themeSize.get(n.themeId) != null && <span className="font-mono text-xs text-dim">{themeSize.get(n.themeId)} replies</span>}
+                </p>
+                <p className="mt-1 text-[13px] leading-relaxed text-muted">{n.howToAnswer}</p>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {card.sources.length > 0 && (
+        <Section icon={BookOpen} title={`Read from ${card.sources.length} documents`}>
+          <div className="flex flex-wrap gap-1.5">
+            {card.sources.map((s) => (
+              <span key={s.docId} className="rounded-md border border-line px-2 py-0.5 text-[11px] text-muted">
+                {s.name}
+              </span>
+            ))}
+          </div>
+        </Section>
+      )}
     </m.div>
   );
 }

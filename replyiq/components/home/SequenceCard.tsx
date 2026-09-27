@@ -1,15 +1,13 @@
 "use client";
-import { ArrowRight, Loader2, Mail, MessageSquareText, Users, Workflow } from "lucide-react";
-import type { RunMeta } from "@/lib/demo/engine";
-import { THREADS } from "@/lib/demo/fixtures";
-import type { SequenceSummary } from "@/lib/types";
+import { ArrowRight, Inbox, Layers, Loader2, MessageSquareText, Users, Workflow } from "lucide-react";
+import type { RunSummary, SourceSummary } from "@/lib/api-types";
 import { displayName, timeAgo } from "@/lib/ui/format";
 import { Button, Chip, Counter, SpotCard } from "../ui/primitives";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 
 export default function SequenceCard({
-  seq,
+  source,
   i,
   primary,
   busy,
@@ -18,70 +16,62 @@ export default function SequenceCard({
   now,
   onLaunch,
 }: {
-  seq: SequenceSummary;
+  source: SourceSummary;
   i: number;
   primary: boolean;
   busy: boolean;
   disabled: boolean;
-  lastRun?: RunMeta;
+  lastRun?: RunSummary;
   now: number;
   onLaunch: () => void;
 }) {
-  const snippets = [...new Set((THREADS[seq.id] ?? []).map((t) => t.replyText))].slice(0, 3);
+  const hasReplies = source.replyThreads > 0;
   return (
     <SpotCard
       tilt
-      className="group flex flex-col gap-6 p-6 sm:p-7"
+      className={`group flex flex-col gap-6 p-6 sm:p-7 ${hasReplies ? "" : "opacity-60"}`}
       initial={{ opacity: 0, y: 30 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      whileInView={{ opacity: hasReplies ? 1 : 0.6, y: 0 }}
       viewport={{ once: true, margin: "-60px" }}
-      transition={{ delay: i * 0.1, duration: 0.8, ease }}
+      transition={{ delay: Math.min(i, 4) * 0.08, duration: 0.8, ease }}
     >
       <div className="flex items-start justify-between gap-4">
         <span className="grid size-11 place-items-center rounded-xl border border-line-2 bg-gradient-to-br from-iris/20 to-aqua/10">
           <Workflow className="size-5 text-iris" strokeWidth={1.6} />
         </span>
-        <Chip color="#4fe3d1">{seq.status}</Chip>
+        {source.sequenceStatus && <Chip color={/active|running/i.test(source.sequenceStatus) ? "#d4ff4f" : "#4fe3d1"}>{source.sequenceStatus.toLowerCase()}</Chip>}
       </div>
 
       <div>
-        <h3 className="text-2xl font-semibold tracking-tight">{displayName(seq.name)}</h3>
-        <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted">
-          <span className="flex items-center gap-1.5">
-            <Users className="size-3.5" /> {seq.contactCount} contacts
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Mail className="size-3.5" /> {seq.stepCount}-step email sequence
-          </span>
-        </p>
+        <h3 className="text-2xl font-semibold tracking-tight">{displayName(source.sequenceName)}</h3>
+        {source.campaignName && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-sm text-muted">
+            <Layers className="size-3.5 shrink-0" /> <span className="truncate">{displayName(source.campaignName)}</span>
+          </p>
+        )}
       </div>
 
-      <div className="rounded-2xl border border-line bg-white/[0.02] p-4">
-        <div className="mb-3 flex items-baseline justify-between">
-          <span className="flex items-center gap-2 text-sm text-text">
-            <MessageSquareText className="size-4 text-aqua" />
-            <span className="text-2xl font-semibold tabular-nums">
-              <Counter value={seq.threads} />
-            </span>
-            replies waiting
-          </span>
-        </div>
-        <ul className="flex flex-col gap-1.5">
-          {snippets.map((s, k) => (
-            <li
-              key={s}
-              className="w-fit max-w-full truncate rounded-xl rounded-bl-sm border border-line bg-ink-3/80 px-3 py-1.5 text-[13px] text-muted transition-transform duration-500 group-hover:translate-x-1"
-              style={{ transitionDelay: `${k * 60}ms` }}
-            >
-              {s}
-            </li>
-          ))}
-        </ul>
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { icon: MessageSquareText, v: source.replyThreads, l: "replies", tone: "text-aqua" },
+          { icon: Users, v: source.contactCount ?? 0, l: "contacts", tone: "text-iris" },
+          { icon: Inbox, v: source.mailboxes.length, l: source.mailboxes.length === 1 ? "inbox" : "inboxes", tone: "text-muted" },
+        ].map((x) => (
+          <div key={x.l} className="rounded-xl border border-line bg-white/[0.02] p-3">
+            <x.icon className={`size-3.5 ${x.tone}`} />
+            <div className="mt-2 text-2xl font-semibold tabular-nums">
+              <Counter value={x.v} />
+            </div>
+            <div className="text-[11px] text-dim">{x.l}</div>
+          </div>
+        ))}
       </div>
 
       <div className="mt-auto flex items-center justify-between gap-3">
-        <span className="text-xs text-dim">{lastRun ? `Last analysed ${timeAgo(lastRun.createdAt, now)}` : "Not analysed yet"}</span>
-        <Button variant={primary ? "primary" : "ghost"} magnetic disabled={disabled} onClick={onLaunch}>
+        <span className="text-xs text-dim">
+          {!hasReplies ? "No replies yet" : lastRun ? `Last analysed ${timeAgo(Date.parse(lastRun.createdAt), now)}` : "Not analysed yet"}
+        </span>
+        <Button variant={primary ? "primary" : "ghost"} magnetic disabled={disabled || !hasReplies} onClick={onLaunch}>
           {busy ? (
             <>
               <Loader2 className="size-4 animate-spin" /> Spinning up agents

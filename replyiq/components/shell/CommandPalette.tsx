@@ -1,15 +1,11 @@
 "use client";
 import { AnimatePresence, m } from "motion/react";
-import { ArrowRight, History, Home, Play, Search, Sparkles } from "lucide-react";
+import { ArrowRight, History, Home, Loader2, Play, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { SEQUENCES } from "@/lib/demo/fixtures";
-import { sequenceOf } from "@/lib/demo/engine";
-import { createRun } from "@/lib/client/store";
-import { useRuns } from "@/lib/client/hooks";
+import { api, keys, revalidate, useRunSummaries, useSources } from "@/lib/client/api";
 import { Kbd } from "../ui/primitives";
 import { displayName } from "@/lib/ui/format";
-
 
 interface Item {
   id: string;
@@ -28,7 +24,10 @@ export default function CommandPalette() {
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const runs = useRuns();
+  const [starting, setStarting] = useState<string | null>(null);
+  // Only read the org while the palette is open.
+  const { data: sources } = useSources(open);
+  const { data: runs = [] } = useRunSummaries(open);
 
   useEffect(() => {
     const reset = () => {
@@ -68,39 +67,39 @@ export default function CommandPalette() {
     };
     const all: Item[] = [
       { id: "home", group: "Navigate", title: "Command center", icon: <Home className="size-4" />, run: go("/") },
-      ...SEQUENCES.map((s) => ({
-        id: `run-${s.id}`,
-        group: "Run ReplyIQ on",
-        title: displayName(s.name),
-        hint: `${s.threads} threads`,
-        icon: <Play className="size-4" />,
-        run: () => {
-          const meta = createRun(s.id);
-          setOpen(false);
-          router.push(`/runs/${meta.id}`);
-        },
-      })),
-      ...runs.slice(0, 5).map((r) => ({
+      ...(sources ?? [])
+        .filter((src) => src.replyThreads > 0)
+        .map((src) => ({
+          id: `run-${src.sequenceId}`,
+          group: "Analyse replies of",
+          title: displayName(src.sequenceName),
+          hint: `${src.replyThreads} replies`,
+          icon: starting === src.sequenceId ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />,
+          run: () => {
+            if (starting) return;
+            setStarting(src.sequenceId);
+            api
+              .startRun({ sequenceId: src.sequenceId })
+              .then(({ runId }) => {
+                void revalidate(keys.runs);
+                setOpen(false);
+                router.push(`/runs/${runId}`);
+              })
+              .finally(() => setStarting(null));
+          },
+        })),
+      ...runs.slice(0, 6).map((r) => ({
         id: `past-${r.id}`,
         group: "Recent runs",
-        title: displayName(sequenceOf(r.sequenceId).name),
+        title: displayName(r.name || "Run"),
         hint: new Date(r.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         icon: <History className="size-4" />,
         run: go(`/runs/${r.id}`),
       })),
     ];
-    if (runs[0]) {
-      all.push({
-        id: "latest-pricing",
-        group: "Jump to",
-        title: "Latest run → Pricing Answer Card",
-        icon: <Sparkles className="size-4" />,
-        run: go(`/runs/${runs[0].id}/groups/pricing_request`),
-      });
-    }
     const needle = q.trim().toLowerCase();
     return needle ? all.filter((i) => `${i.group} ${i.title}`.toLowerCase().includes(needle)) : all;
-  }, [q, runs, router]);
+  }, [q, runs, sources, starting, router]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {

@@ -1,36 +1,61 @@
 "use client";
 import { m } from "motion/react";
-import { ArrowDown, Ban, Play, ShieldCheck, Split, Tags } from "lucide-react";
+import { ArrowDown, Ban, Play, RefreshCcw, ShieldCheck, Split, Tags } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ReplyCore, { type Orb } from "../three/ReplyCore";
-import ReplyTicker, { REPLY_SAMPLES, type TickerPhase } from "./ReplyTicker";
+import ReplyTicker, { type TickerItem, type TickerPhase } from "./ReplyTicker";
 import AgentStrip from "./AgentStrip";
 import SequenceCard from "./SequenceCard";
 import RecentRuns from "./RecentRuns";
+import StateNotice from "../shell/StateNotice";
 import { Button, Counter, Eyebrow, Kbd, SpotCard } from "../ui/primitives";
 import { openPalette } from "../shell/CommandPalette";
-import { SEQUENCES } from "@/lib/demo/fixtures";
-import { createRun } from "@/lib/client/store";
-import { useRuns } from "@/lib/client/hooks";
-import { CATEGORY_COLOR } from "@/lib/ui/theme";
-import { TAXONOMY } from "@/lib/taxonomy";
-import type { EnvFlags } from "../shell/TopBar";
+import { api, keys, revalidate, useRunSummaries, useRunView, useSources, useStatus } from "@/lib/client/api";
+import { ALL_CATEGORIES, meta } from "@/lib/ui/categories";
 
-const ORB_COUNT = REPLY_SAMPLES.length * 2;
-const sampleOf = (orb: number) => orb % REPLY_SAMPLES.length;
 const ease = [0.16, 1, 0.3, 1] as const;
-const REASONS = Object.keys(TAXONOMY).length;
+const REASONS = ALL_CATEGORIES.length;
+const MAX_ORBS = 28;
 
-export default function CommandCenter({ env }: { env: EnvFlags }) {
+/** Before any run exists, the core shows what ReplyIQ listens for: the real reasons, with their definitions. */
+const TAXONOMY_ITEMS: TickerItem[] = ALL_CATEGORIES.map((key) => ({
+  id: key,
+  text: meta(key).definition.split(". ")[0].replace(/\.$/, "") + ".",
+  who: "What ReplyIQ listens for",
+  category: key,
+}));
+
+export default function CommandCenter() {
   const router = useRouter();
-  const runs = useRuns();
+  const { data: status } = useStatus();
+  const configured = status?.configured === true;
+  const sources = useSources(configured);
+  const { data: runs } = useRunSummaries(configured);
+  const latestDone = runs?.find((r) => r.status === "done" && r.replies > 0);
+  const { data: latest } = useRunView(configured ? (latestDone?.id ?? null) : null);
   const [now] = useState(() => Date.now());
   const [tick, setTick] = useState(0); // the orb the Analyst is reading
   const [phase, setPhase] = useState<"reading" | "labelled">("reading");
   const [pinned, setPinned] = useState<number | null>(null); // the orb under the cursor
   const [pulse, setPulse] = useState(0);
   const [launching, setLaunching] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
+  // Real replies from the latest finished run; otherwise the reasons themselves.
+  const items: TickerItem[] = useMemo(() => {
+    const replies = latest?.groups.flatMap((g) => g.replies) ?? [];
+    if (!replies.length) return TAXONOMY_ITEMS;
+    return replies.slice(0, MAX_ORBS).map((r) => ({
+      id: r.threadId,
+      text: r.quote,
+      who: [r.contactName, r.company].filter(Boolean).join(" · ") || r.contactEmail,
+      category: r.category,
+      confidence: r.confidence,
+    }));
+  }, [latest]);
+  const source = items === TAXONOMY_ITEMS ? "taxonomy" : "run";
+  const count = items.length;
 
   // reading → labelled → next orb; paused while an orb is hovered
   useEffect(() => {
@@ -42,37 +67,46 @@ export default function CommandCenter({ env }: { env: EnvFlags }) {
           setPulse((p) => p + 1);
         } else {
           setPhase("reading");
-          setTick((i) => (i + 1) % ORB_COUNT);
+          setTick((i) => (i + 1) % count);
         }
       },
       phase === "reading" ? 1300 : 2400,
     );
     return () => clearTimeout(t);
-  }, [phase, tick, pinned]);
+  }, [phase, tick, pinned, count]);
 
-  const active = pinned ?? tick;
+  const active = (pinned ?? tick) % count;
   const tickerPhase: TickerPhase = pinned != null ? "inspecting" : phase;
 
   const orbs: Orb[] = useMemo(
     () =>
-      Array.from({ length: ORB_COUNT }, (_, i) => ({
+      items.map((it, i) => ({
         id: String(i),
-        color: CATEGORY_COLOR[REPLY_SAMPLES[sampleOf(i)].category],
-        state: i === tick && phase === "reading" && pinned == null ? "core" : "orbit",
+        color: meta(it.category).color,
+        state: i === tick % count && phase === "reading" && pinned == null ? "core" : "orbit",
         cluster: 0,
         clusters: 1,
         slot: 0,
         slots: 1,
       })),
-    [tick, phase, pinned],
+    [items, tick, phase, pinned, count],
   );
 
-  const launch = (sequenceId: string) => {
+  const launch = async (sequenceId: string) => {
     setLaunching(sequenceId);
+    setLaunchError(null);
     setPulse((p) => p + 1);
-    const meta = createRun(sequenceId);
-    setTimeout(() => router.push(`/runs/${meta.id}`), 650);
+    try {
+      const { runId } = await api.startRun({ sequenceId });
+      void revalidate(keys.runs);
+      router.push(`/runs/${runId}`);
+    } catch (e) {
+      setLaunchError((e as Error).message);
+      setLaunching(null);
+    }
   };
+
+  const sourceList = [...(sources.data ?? [])].sort((a, b) => b.replyThreads - a.replyThreads);
 
   return (
     <div className="relative">
@@ -88,7 +122,7 @@ export default function CommandCenter({ env }: { env: EnvFlags }) {
             className="absolute inset-0"
             label="Reply Core: replies orbit the ReplyIQ agent. Hover to tilt it, sweep across to spin it, hover a reply to inspect it."
             orbs={orbs}
-            focusId={pinned == null ? String(tick) : null}
+            focusId={pinned == null ? String(tick % count) : null}
             pulseKey={pulse}
             energy={phase === "reading" && pinned == null ? 0.35 : 0.1}
             onHover={(id) => {
@@ -115,7 +149,7 @@ export default function CommandCenter({ env }: { env: EnvFlags }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6, duration: 0.8, ease }}
         >
-          <ReplyTicker index={sampleOf(active)} phase={tickerPhase} />
+          <ReplyTicker item={items[active]} phase={tickerPhase} source={source} />
         </m.div>
 
         <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center gap-7 px-4 pb-20 pt-16 text-center">
@@ -207,7 +241,7 @@ export default function CommandCenter({ env }: { env: EnvFlags }) {
           <div>
             <Eyebrow>The agent chain</Eyebrow>
             <h2 className="mt-4 max-w-2xl text-4xl font-semibold tracking-[-0.03em] sm:text-5xl">
-              Six agents. One pass. <span className="font-serif font-normal italic text-iris">You approve</span> what ships.
+              Seven agents. One pass. <span className="font-serif font-normal italic text-iris">You approve</span> what ships.
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-muted">
@@ -244,32 +278,55 @@ export default function CommandCenter({ env }: { env: EnvFlags }) {
 
       {/* --------------------------------- launch --------------------------------- */}
       <section id="launch" className="mx-auto w-full max-w-[1400px] scroll-mt-20 px-4 pb-24 sm:px-6">
-        <div className="mb-8">
-          <Eyebrow>Step 1</Eyebrow>
-          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">Pick a finished sequence</h2>
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <Eyebrow>Step 1</Eyebrow>
+            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">Pick a finished sequence</h2>
+          </div>
+          {configured && sources.data && (
+            <Button variant="ghost" className="!px-3.5 !py-2 text-xs" onClick={() => void api.refreshSources().then(() => revalidate(keys.sources))}>
+              <RefreshCcw className="size-3.5" /> Refresh from graph8
+            </Button>
+          )}
         </div>
-        <div className="grid gap-5 lg:grid-cols-2">
-          {SEQUENCES.map((s, i) => (
-            <SequenceCard
-              key={s.id}
-              seq={s}
-              i={i}
-              primary={i === 0}
-              busy={launching === s.id}
-              disabled={!!launching}
-              lastRun={runs.find((r) => r.sequenceId === s.id)}
-              now={now}
-              onLaunch={() => launch(s.id)}
-            />
-          ))}
-        </div>
+        {!configured ? (
+          <StateNotice kind="setup" compact />
+        ) : sources.error && !sources.data ? (
+          <StateNotice kind="error" compact title="Couldn't read your graph8 org" detail={sources.error.message} />
+        ) : !sources.data ? (
+          <div className="grid gap-5 lg:grid-cols-2">
+            {[0, 1].map((i) => (
+              <div key={i} className="surface h-72 animate-pulse rounded-2xl opacity-50" />
+            ))}
+            <p className="text-sm text-dim lg:col-span-2">Discovering sequences and counting replies in your graph8 org…</p>
+          </div>
+        ) : sourceList.length === 0 ? (
+          <StateNotice kind="not-found" compact title="No sequences in this org yet" detail="Once a sequence has replies in the graph8 Inbox, it shows up here." />
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-2">
+            {sourceList.map((src, i) => (
+              <SequenceCard
+                key={src.sequenceId}
+                source={src}
+                i={i}
+                primary={i === 0}
+                busy={launching === src.sequenceId}
+                disabled={!!launching}
+                lastRun={runs?.find((r) => r.name === src.sequenceName || (src.campaignName != null && r.name === src.campaignName))}
+                now={now}
+                onLaunch={() => void launch(src.sequenceId)}
+              />
+            ))}
+          </div>
+        )}
+        {launchError && <p className="mt-4 text-sm text-rose">{launchError}</p>}
 
-        <RecentRuns runs={runs} />
+        <RecentRuns runs={runs ?? []} now={now} />
 
         <div className="hairline-x mt-16" />
         <p className="mt-6 text-center font-mono text-[11px] leading-relaxed text-dim">
           Sandbox only · no real sends · sandbox checked before every write · hard stops never re-contacted · launch{" "}
-          {env.launchEnabled ? "enabled" : "needs approval"}
+          {status?.launchEnabled ? "enabled" : "by a person in graph8"}
         </p>
       </section>
     </div>

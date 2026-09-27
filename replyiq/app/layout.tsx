@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
-import { envStatus } from "@/lib/env";
 import Providers from "@/components/shell/Providers";
 import TopBar from "@/components/shell/TopBar";
 import CommandPalette from "@/components/shell/CommandPalette";
@@ -17,10 +16,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { themeColor: "#05060a" };
 
-export const dynamic = "force-dynamic";
-
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  const env = envStatus();
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${serif.variable} h-full antialiased`}>
       <body className="relative min-h-full">
@@ -29,7 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <div className="grain" aria-hidden />
         <Providers>
           <div className="relative z-10 flex min-h-screen flex-col">
-            <TopBar env={env} />
+            <TopBar />
             <main className="flex flex-1 flex-col">{children}</main>
           </div>
           <CommandPalette />
