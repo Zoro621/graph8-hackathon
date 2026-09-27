@@ -204,8 +204,10 @@ const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefin
  * The draft looks each name up within that reply's company, so a name counts once per company. This is an
  * upper bound: the draft still enforces the minimum on the contacts it actually finds.
  */
-export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, min: number, org?: string): Draftability {
+export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, minGroup: number, org?: string): Draftability {
   const referral = g.key === "referral_wrong_person";
+  // A referral is a warm intro to one named person: one found in the CRM is enough. Other groups keep the minimum.
+  const min = referral ? REFERRAL_MIN : minGroup;
   // Referrals: the run's CRM lookup when it ran (who can actually be reached), else the names as an upper bound.
   const named = referral ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size : 0;
   const targets = referral ? (g.referralLookup?.found ?? named) : g.eligible.length;
@@ -292,6 +294,9 @@ export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<R
       job: jobsById.get(r.id) ?? null,
     }));
 }
+
+/** Referral follow-ups: one named person found in the CRM is enough to draft. */
+export const REFERRAL_MIN = 1;
 
 // ---------- drafts ----------
 

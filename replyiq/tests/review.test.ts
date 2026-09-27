@@ -24,9 +24,10 @@ describe("draftability (same rules as the draft)", () => {
     ({ key, label: key, replies, eligible: Array.from({ length: eligible }, (_, i) => ({ contactId: i, email: `${i}@x.com`, threadId: `t${i}` })), excluded: [] }) as Group;
   const done = { steps: { resolve: "done" } } as never;
 
-  it("referrals need enough distinct named people, not just any referral", () => {
-    expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin")]), 2)).toMatchObject({ ok: false, targets: 1 });
-    expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin"), reply("kurt huegin")]), 2).ok).toBe(false);
+  it("referrals: one named person is enough (a warm intro), counted once per company", () => {
+    expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin")]), 2)).toMatchObject({ ok: true, targets: 1 });
+    expect(draftability(done, group("referral_wrong_person", [reply("their team leaders")]), 2)).toMatchObject({ ok: false, targets: 0 });
+    expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin"), reply("kurt huegin")]), 2)).toMatchObject({ ok: true, targets: 1 });
     expect(draftability(done, group("referral_wrong_person", [reply("Kurt Huegin"), reply("Rob Moore")]), 2)).toMatchObject({ ok: true, targets: 2 });
   });
   it("referrals: once the run looked the names up in the CRM, only the people found count, and the reason says why", () => {
@@ -34,6 +35,7 @@ describe("draftability (same rules as the draft)", () => {
     g.referralLookup = { found: 0, named: 2, notes: ["Kurt Huegin: not in the CRM yet"] };
     const d = draftability(done, g, 2);
     expect(d).toMatchObject({ ok: false, targets: 0 });
+    expect(d.reason).toContain("Needs at least 1 named");
     expect(d.reason).toContain("0 of the 2 named are there");
     g.referralLookup = { found: 2, named: 2, notes: [] };
     expect(draftability(done, g, 2)).toMatchObject({ ok: true, targets: 2 });
@@ -70,7 +72,7 @@ describe("PR #2 review fixes", () => {
       eligible: [],
       excluded: [],
     } as unknown as Group;
-    expect(draftability({ steps: { resolve: "done" } } as never, g, 2)).toMatchObject({ ok: false, targets: 1 });
+    expect(draftability({ steps: { resolve: "done" } } as never, g, 2)).toMatchObject({ ok: true, targets: 1 });
   });
 
   it("the same name at two companies is two referral targets (the draft looks names up per company)", () => {

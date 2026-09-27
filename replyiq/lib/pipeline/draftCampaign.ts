@@ -380,7 +380,7 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
       }
       audience.push(c);
     }
-    const min = deps.minAudience ?? 2;
+    const min = group.key === "referral_wrong_person" ? 1 : (deps.minAudience ?? 2); // a referral is a warm intro to one person
     if (audience.length < min) {
       throw new DraftError(`only ${audience.length} contact(s) can be targeted for "${group.label}" (minimum ${min}). ${draft.audienceNotes.slice(0, 3).join(" | ")}`);
     }
