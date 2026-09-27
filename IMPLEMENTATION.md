@@ -60,12 +60,21 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 
 ## Integration status (27 Sep)
 - **Backend ↔ graph8:** every stage is integrated and verified live by reading graph8 back. The chain is discovery, then fetch, classify, themes, tags, audience, Answer Cards, Studio draft, follow-up sequence (with previews) and company-wide learnings. Commands: `npm run e2e`, `npm run test:live`, `npm run spike`.
-- **Backend ↔ UI: not connected yet.**
-  - The branch `feat/replyiq-ui` forked at M0 (`66662b7`), before M1–M5b. It runs on its own demo engine and fixtures (`lib/demo/*`), with an older copy of `lib/types.ts` and `lib/taxonomy.ts`. It doesn't call the backend.
-  - To integrate:
-    1. Rebase it on `main`, keeping `main`'s `lib/types.ts` / `lib/taxonomy.ts`. The UI's shapes are mostly a subset, but `Run.source` differs (selector + sequences, not `sequenceId`), and there is a `themes` step and a `meeting_booked` category.
-    2. Add the API routes the UI expects (`GET /api/sources`, `POST /api/runs`, `GET /api/runs/[id]`, draft, sequence preview, learnings propose/apply/remove) as thin wrappers over the existing library functions.
-    3. Swap the demo engine for those routes: the engine header already says this is a one-file change.
+- **Backend ↔ UI: connected (M6, `feat/replyiq-ui`, PR #1).** `main` was merged into the UI branch, keeping `main`'s `lib/types.ts` / `lib/taxonomy.ts`. The demo engine is gone: every screen reads the real backend.
+  - **API routes** (`app/api/*`) are thin wrappers over `lib/server/service.ts`, which takes its dependencies as arguments (tested offline in `tests/service.test.ts`):
+
+    | Route | Does |
+    |---|---|
+    | `GET /api/status` | keys present, write policy, credit balance (never the key values) |
+    | `GET /api/sources` | `discoverSources()`, cached 60 s (`?refresh=1` re-reads) |
+    | `GET /api/runs`, `POST /api/runs {sequenceId \| campaignId, writeTags?}` | recent runs; start a run: saves the empty run, then `runPipeline` runs after the response (`next/server` `after`) |
+    | `GET /api/runs/[id]` | the run without full conversations or document backups, plus the job working on it and `interrupted` |
+    | `POST /api/runs/[id]/groups/[key]/draft {action: create \| patch \| previews}` | `draftCampaign` in the background (waits up to 150 s for Studio, then "patch" adds the card later) |
+    | `POST /api/runs/[id]/learnings {action: propose \| apply \| remove}` | Studio learnings |
+  - **One job per run** (`lib/server/jobs.ts`): pipeline, draft and learnings each rewrite the whole run file, so a second job on the same run gets 409. If the server restarts mid-job, the run view reports `interrupted` and the UI offers to run again or resume the draft (the draft reuses its list and campaign).
+  - **The UI polls** `GET /api/runs/[id]` every 1.5 s only while something is working (`lib/client/api.ts`), and pauses while the tab is hidden. Without keys, every screen shows how to connect instead of sample data.
+  - **Windows fix:** saving a run renames a temp file over the run file; on Windows that fails with `EPERM` while another process reads it (the UI polling it, OneDrive, antivirus). `lib/store.ts` now retries the rename with backoff.
+  - **Deploying:** runs are JSON files in `data/runs/`, which needs a persistent disk. On a serverless host, swap `createFileStore` for a hosted key-value store (the `RunStore` interface is the only thing to change).
 
 **Tests (final run, 27 Sep):** 205 offline, 22/22 live, 26/26 spike checks, `npm run e2e -- --once` 31 passed and 0 failed (the 1 warning is the stale Demo Contact 05 tag). The 40 new offline tests cover: rules extraction, number, merge-field and placeholder checks, claim verification, instructions, retries, fail-closed audit, previews, reuse, in-place refresh, read-back, block upsert keeping others' edits, propose/apply/remove with backup, and the client calls. The live tests and the e2e run now also verify every recorded sequence, and every applied Studio block, against graph8.
 
