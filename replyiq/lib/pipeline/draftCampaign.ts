@@ -83,9 +83,11 @@ export async function referralTargets(client: Pick<DraftClient, "searchContacts"
       const last = name.split(" ").at(-1)!;
       let matches: Awaited<ReturnType<typeof client.searchContacts>> = [];
       try {
-        matches = (await client.searchContacts({ name: last, company_name: r.company || undefined })).filter(
-          (c) => c.id && sameName(`${c.first_name ?? ""} ${c.last_name ?? ""}`, name),
-        );
+        const exact = (cs: Awaited<ReturnType<typeof client.searchContacts>>) => cs.filter((c) => c.id && sameName(`${c.first_name ?? ""} ${c.last_name ?? ""}`, name));
+        matches = exact(await client.searchContacts({ name: last, company_name: r.company || undefined }));
+        // graph8's company_name filter misses contacts whose company record carries another name (a contact
+        // created from a lookup is linked by domain). A unique exact full-name match without the filter counts.
+        if (matches.length === 0 && r.company) matches = exact(await client.searchContacts({ name: last }));
       } catch (err) {
         notes.push(`${name}: CRM search failed (${err instanceof Error ? err.message : String(err)})`);
         continue;
