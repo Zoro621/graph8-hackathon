@@ -108,7 +108,7 @@ export default function FollowupEmails({ group, sequence }: { group: GroupView; 
           </ul>
           {sequence.doNotClaim.length > 0 && (
             <div className="mt-4">
-              <p className="text-muted">Never claims:</p>
+              <p className="text-muted">Never claims (the card said it, no document backs it):</p>
               <ul className="mt-1.5 flex flex-col gap-1">
                 {sequence.doNotClaim.map((d) => (
                   <li key={d} className="text-xs text-amber/90">
@@ -116,6 +116,12 @@ export default function FollowupEmails({ group, sequence }: { group: GroupView; 
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+          {sequence.proofGap && (
+            <div className="mt-4">
+              <p className="text-muted">Proof we don&apos;t have (never papered over with a guess):</p>
+              <p className="mt-1.5 text-xs text-amber/90">⚠ {sequence.proofGap}</p>
             </div>
           )}
           {sequence.originalRules.length > 0 && <p className="mt-4 text-xs text-dim">Plus {sequence.originalRules.length} rules carried over from the original campaign.</p>}

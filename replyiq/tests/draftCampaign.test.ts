@@ -80,7 +80,7 @@ function fakeG8(
     members: new Set<number>(),
     campaigns: [] as { body: CampaignCreateBody; key?: string }[],
     campaignUpdates: [] as { id: string; fields: Record<string, unknown> }[],
-    updates: [] as { docId: string; content: string }[],
+    updates: [] as { docId: string; content: string; status?: string }[],
     sequences: [] as { body: SequenceCreateBody; key?: string }[],
     polls: 0,
   };
@@ -136,8 +136,8 @@ function fakeG8(
     getCampaign: async (id: string) => ({ id, name: "x", status: "draft" }),
     listCampaignDocs: async () => docsSeq[Math.min(log.polls++, docsSeq.length - 1)],
     getCampaignDoc: async (_c: string, docId: string) => ({ id: docId, content: docContent.get(docId) ?? "" }),
-    updateCampaignDoc: async (_c: string, docId: string, content: string) => {
-      log.updates.push({ docId, content });
+    updateCampaignDoc: async (_c: string, docId: string, content: string, status?: string) => {
+      log.updates.push({ docId, content, status });
       docContent.set(docId, content);
       return { id: docId };
     },
@@ -228,6 +228,8 @@ describe("draftCampaign", () => {
     await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
     expect(log.campaigns).toHaveLength(1);
     expect(log.updates.filter((u) => u.docId === "o")).toHaveLength(1);
+    // A document ReplyIQ filled is `completed`; without that Studio keeps the generator's `failed` badge on a full document.
+    expect(log.updates.every((u) => u.status === "completed")).toBe(true);
   });
 
   it("re-checks hard stops and suppression right before adding anyone (fail closed)", async () => {

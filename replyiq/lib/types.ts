@@ -98,6 +98,8 @@ export interface Group {
   excluded: { email: string; reason: ExclusionReason; threadId: string; contactId?: number }[];
   themes?: Theme[]; // only for groups with 2+ replies; absent if theme discovery failed
   card?: AnswerCard;
+  /** Referral groups: the named people looked up in the CRM during the run (read-only), so the page can say before the hold who can actually be reached. */
+  referralLookup?: { found: number; named: number; notes: string[] };
   draft?: CampaignDraft;
 }
 
@@ -189,7 +191,8 @@ export interface SequenceDraft {
   steps: { order: number; inputType: "ON_DEMAND" | "MANUAL_TEMPLATE"; delayDays: number; subject?: string }[];
   instructions: string; // what graph8's AI is told for step 1
   facts: EmailFact[]; // the only product facts either email may state
-  doNotClaim: string[]; // proof gaps: never claimed
+  doNotClaim: string[]; // claims the Answer Card made that no document backs: never stated
+  proofGap?: string; // what the company has no proof for (a description, not a claim): never papered over
   originalRules: string[]; // rules carried over from the original campaign's AI steps
   manualEmail?: { subject: string; body: string; check: EmailCheck; attempts: number };
   /** graph8's AI drafts of step 1 for a few contacts (nothing sent), each fact-checked by ReplyIQ. */

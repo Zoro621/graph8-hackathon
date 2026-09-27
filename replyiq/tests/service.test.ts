@@ -107,6 +107,21 @@ describe("startRun", () => {
     expect(reply.conversation).toBeUndefined();
     expect(reply.messages).toBe(2);
   });
+
+  it("reads the job lock before the run file, so a job finishing in between never reads as interrupted", async () => {
+    const order: string[] = [];
+    const base = deps();
+    const d: ServiceDeps = {
+      ...base,
+      store: { ...base.store, load: async (id) => (order.push("file"), base.store.load(id)) },
+      jobs: { active: async () => (order.push("lock"), null), claim: async () => true, release: async () => {} },
+    };
+    const { runId } = await startRun(d, { sequenceId: "seqA", writeTags: false });
+    order.length = 0;
+    await getRunView(d, runId);
+    expect(order[0]).toBe("lock");
+    expect(order.indexOf("lock")).toBeLessThan(order.indexOf("file"));
+  });
 });
 
 describe("getRunView", () => {
@@ -322,7 +337,8 @@ describe("rewrite, takeover and V1", () => {
       getSequenceSteps: async () => ({
         sequence_id: "seqA",
         steps: [
-          { step_order: 2, time_interval: 3 * 86_400, input_type: "MANUAL_TEMPLATE", step_data: { subject: "Bump", body: "<p>Just checking in.</p>" } },
+          // a fixed-text step that also carries a note in `instructions` (graph8's [DEMO] steps do): the note is not the email
+          { step_order: 2, time_interval: 3 * 86_400, input_type: "MANUAL_TEMPLATE", step_data: { subject: "Bump", body: "<p>Just checking in.</p>", instructions: "Training fixture only" } },
           { step_order: 1, time_interval: 0, input_type: "ON_DEMAND", step_data: { instructions: "Write a short intro." } },
         ],
       }),

@@ -254,6 +254,10 @@ describe("step 1 instructions for graph8's AI", () => {
     expect(ins).toContain("Never claim (we have no proof for this):\n- No cost estimator.");
     expect(ins).toContain("Rules from the original campaign (keep them):\n- Never use em dashes.");
     expect(ins).toContain("How to answer: Send the published pricing.");
+    // The proof gap is a description of missing proof, not a claim: its own section, never under "Never claim".
+    const withGap = stepInstructions(makeRun(g), g, facts, [], [], "No plan-by-plan pricing table.");
+    expect(withGap).toContain("Proof we do not have: No plan-by-plan pricing table.\nDo not fill that gap with a guess");
+    expect(withGap).not.toContain("Never claim");
   });
 
   it("never leak the classifier's internal notes, and give card-less groups a real goal", () => {
@@ -307,7 +311,12 @@ describe("buildFollowupSequence", () => {
     expect(writer.FACTS.map((x: { id: string }) => x.id)).toEqual(["X1", "X2"]);
     expect(writer.VOICE).toContain("Brand Voice");
     expect(writer.ORIGINAL_RULES).toContain("Never use em dashes or en dashes.");
-    expect(writer.DO_NOT_CLAIM).toEqual(["No cost estimator."]);
+    // The proof gap is not a claim: it reaches the writer and the fact-checker as "never fill this gap", and the card's unproven claims (none here) as "never claim".
+    expect(seq.doNotClaim).toEqual([]);
+    expect(seq.proofGap).toBe("No cost estimator.");
+    expect(writer.DO_NOT_CLAIM).toEqual(["Anything that would fill this proof gap (the company has no proof for it): No cost estimator."]);
+    expect(seq.instructions).toContain("Proof we do not have: No cost estimator.");
+    expect(seq.instructions).not.toContain("Never claim (we have no proof for this)");
     // the auditor knows where each email sits in the sequence
     const audit = JSON.parse(calls.find((c) => c.name === "email_audit")!.user);
     expect(audit.POSITION).toMatch(/^Step 2: sent 4 days after step 1/);

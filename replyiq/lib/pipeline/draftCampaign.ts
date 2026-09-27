@@ -499,15 +499,18 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
       }
       const label = meta.file_type ?? kind;
       if (draft.docsPatched.includes(label) && !refreshDocs) continue;
-      if (kind === "brief" && !isFailed(meta)) continue; // a generated brief is Studio's; only fill a failed one
       if (!isTerminal(meta)) {
         draft.docsPending.push(label); // generation would overwrite our text: patch later
         continue;
       }
       const content = docText(await deps.g8.getCampaignDoc(draft.campaignId!, meta.id));
+      // A brief Studio generated is Studio's: only a failed (empty) one, or one ReplyIQ wrote earlier, is filled.
+      if (kind === "brief" && !isFailed(meta) && !anyRunMarker(group.key).test(content)) continue;
       const next = upsertSection(content, render(), marker(run.id, group.key), refreshDocs);
       if (next !== null && next !== content) {
-        await deps.g8.updateCampaignDoc(draft.campaignId!, meta.id, next);
+        // The document now has grounded text, so it is `completed`: otherwise Studio keeps showing the
+        // generator's `failed` badge on a document that is full.
+        await deps.g8.updateCampaignDoc(draft.campaignId!, meta.id, next, "completed");
         if (!content.trim()) draft.warnings.push(`${docLabel(label)}: Studio left it empty; ReplyIQ wrote its grounded section into it`);
       }
       if (!draft.docsPatched.includes(label)) draft.docsPatched.push(label);

@@ -72,7 +72,24 @@ export default function AudienceTable({ group, runExcluded }: { group: GroupView
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-xs text-dim">The follow-up goes to the named people, looked up in the CRM when you draft. The person who left is never contacted.</p>
+          {group.referralLookup ? (
+            <div className="mt-3 rounded-xl border border-line bg-white/[0.02] p-3 text-xs leading-relaxed">
+              <p className={group.referralLookup.found >= 2 ? "text-aqua" : "text-amber"}>
+                {group.referralLookup.found} of the {group.referralLookup.named} named people are in the CRM
+                {group.referralLookup.found < group.referralLookup.named ? "; the rest would need an enrichment lookup (costs credits, needs your approval)" : ""}.
+              </p>
+              {group.referralLookup.notes.length > 0 && (
+                <ul className="mt-1.5 flex flex-col gap-1 text-dim">
+                  {group.referralLookup.notes.map((n) => (
+                    <li key={n}>• {n}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-dim">The follow-up goes to the named people, looked up in the CRM when you draft.</p>
+          )}
+          <p className="mt-2 text-xs text-dim">The person who left is never contacted.</p>
         </div>
       )}
 

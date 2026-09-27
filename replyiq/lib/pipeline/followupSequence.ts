@@ -212,7 +212,7 @@ export function goalFor(group: Group): string {
 }
 
 /** The step 1 prompt, assembled by code from grounded data only (same shape as graph8's own AI steps). */
-export function stepInstructions(run: Run, group: Group, facts: EmailFact[], doNotClaim: string[], rules: string[]): string {
+export function stepInstructions(run: Run, group: Group, facts: EmailFact[], doNotClaim: string[], rules: string[], proofGap?: string): string {
   const info = categoryInfo(group.key);
   const card = group.card;
   const reopen = info.followUp === "later" || group.key === "referral_wrong_person";
@@ -238,6 +238,7 @@ export function stepInstructions(run: Run, group: Group, facts: EmailFact[], doN
     ...(facts.length ? facts.map((f) => `- ${f.claim}: "${oneLine(f.excerpt)}" (${f.source})`) : ["- None. Do not state product facts; keep to their request and a question."]),
   );
   if (doNotClaim.length) lines.push("", "Never claim (we have no proof for this):", ...doNotClaim.map((d) => `- ${d}`));
+  if (proofGap) lines.push("", `Proof we do not have: ${proofGap}`, "Do not fill that gap with a guess, an estimate or a promise; if they ask about it, offer to find out.");
   lines.push(
     "",
     "Personalization: use only first_name, last_name, company name and title. Never invent details, news or activity.",
@@ -481,7 +482,7 @@ export async function previewStep1(deps: SequenceDeps, run: Run, group: Group, d
       }
       const out = await deps.g8.generateEmailDraft(body);
       const email = { subject: out.subject.trim(), body: toPlainText(out.body) || out.body };
-      const check = await fullCheck(deps.llm, deps.auditModel ?? deps.model, email, seq.facts, seq.doNotClaim, seq.originalRules, { mergeFields: false, minWords: 20, maxWords: 220, position: STEP1_POSITION }, [], [body.lead_info, a.email]);
+      const check = await fullCheck(deps.llm, deps.auditModel ?? deps.model, email, seq.facts, neverList(seq), seq.originalRules, { mergeFields: false, minWords: 20, maxWords: 220, position: STEP1_POSITION }, [], [body.lead_info, a.email]);
       previews.push({ contactId: a.contactId, email: a.email, ...email, check });
       deps.log?.(`  preview for ${a.email}: ${check.ok ? "passed" : `${check.issues.length} issue(s)`}`);
     } catch (err) {
@@ -500,7 +501,10 @@ async function compose(deps: SequenceDeps, run: Run, group: Group, seq: Sequence
   seq.originalRules = original.rules;
   for (const o of original.sources) docs.all.set(o.docId, o.text);
   const card = group.card;
-  seq.doNotClaim = [card?.proofGap, ...(card?.unverifiedClaims ?? [])].filter((x): x is string => Boolean(x?.trim())).map(oneLine);
+  // Claims the card made that no document backs: never stated. The proof gap is different: it describes
+  // what the company has no proof FOR (not a claim), so it is kept apart and worded as such everywhere.
+  seq.doNotClaim = (card?.unverifiedClaims ?? []).filter((x) => Boolean(x?.trim())).map(oneLine);
+  seq.proofGap = card?.proofGap?.trim() ? oneLine(card.proofGap) : undefined;
   // The card's proof is re-checked against its document as it reads now, without ReplyIQ's own blocks: a card
   // made before those blocks were ignored may cite them, and a document may have changed since the run.
   const proof = card?.proofWeHave ?? [];
@@ -523,7 +527,7 @@ async function compose(deps: SequenceDeps, run: Run, group: Group, seq: Sequence
   // Facts both steps may state: the card's verified proof first, then verified picks from the sources.
   let picked: EmailFact[] = [];
   try {
-    const sel = await selectFacts(deps, run, group, sources, docs.all, seq.doNotClaim);
+    const sel = await selectFacts(deps, run, group, sources, docs.all, neverList(seq));
     picked = sel.facts;
     if (sel.issues.length) warnings.push(`${sel.issues.length} suggested fact(s) dropped: not verbatim in their source`);
   } catch (err) {
@@ -531,11 +535,17 @@ async function compose(deps: SequenceDeps, run: Run, group: Group, seq: Sequence
   }
   seq.facts = dedupeFacts([...cardFacts, ...picked]).slice(0, MAX_FACTS);
 
-  seq.manualEmail = await writeStep2(deps, run, group, seq.facts, voice, seq.doNotClaim, seq.originalRules);
+  seq.manualEmail = await writeStep2(deps, run, group, seq.facts, voice, neverList(seq), seq.originalRules);
   if (!deps.llm) warnings.push("no model configured: step 2 was not written, the sequence has step 1 only");
   else if (seq.manualEmail && !seq.manualEmail.check.ok) warnings.push(`step 2 failed the fact-check twice and was left out: ${seq.manualEmail.check.issues.slice(0, 3).join(" | ")}`);
-  seq.instructions = stepInstructions(run, group, seq.facts, seq.doNotClaim, seq.originalRules);
+  seq.instructions = stepInstructions(run, group, seq.facts, seq.doNotClaim, seq.originalRules, seq.proofGap);
 }
+
+/** What the writer and the fact-checker must never state: the unproven claims, plus anything that would paper over the proof gap. */
+export const neverList = (seq: Pick<SequenceDraft, "doNotClaim" | "proofGap">): string[] => [
+  ...seq.doNotClaim,
+  ...(seq.proofGap ? [`Anything that would fill this proof gap (the company has no proof for it): ${seq.proofGap}`] : []),
+];
 
 const step1Config = (seq: SequenceDraft): SequenceStepConfig => ({ step_order: 1, step_type: "EMAIL", input_type: "ON_DEMAND", time_interval: 0, step_data: { instructions: seq.instructions, email_type: "html" } });
 const step2Config = (m: { subject: string; body: string }): SequenceStepConfig => ({
