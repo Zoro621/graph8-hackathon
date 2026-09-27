@@ -138,11 +138,25 @@ export async function startRun(deps: ServiceDeps, body: unknown): Promise<{ runI
         },
         { selector, runId, writeTags: input.writeTags },
       );
+    } catch (err) {
+      // runPipeline records step failures itself; this only catches a crash (e.g. the run file can't be saved).
+      await recordRunFailure(deps, runId, describeError(err)).catch(() => {});
     } finally {
       release(runId);
     }
   });
   return { runId };
+}
+
+async function recordRunFailure(deps: ServiceDeps, runId: string, error: string) {
+  const run = await deps.store.load(runId);
+  if (!run || run.status !== "running") return;
+  const now = new Date().toISOString();
+  run.status = "failed";
+  run.errors.push(`run stopped: ${error}`);
+  run.finishedAt = now;
+  run.updatedAt = now;
+  await deps.store.save(run);
 }
 
 const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefined =>
@@ -287,6 +301,19 @@ async function recordDraftFailure(deps: ServiceDeps, runId: string, key: Categor
 
 // ---------- company-wide learnings ----------
 
+/** Saving a run's block replaced any older run's block for the same campaign: their records now say so. */
+async function markReplaced(deps: ServiceDeps, newer: Run, keys: string[]) {
+  for (const { id } of await deps.store.list()) {
+    if (id === newer.id || activeJob(id)) continue; // a run with a job is rewritten by that job
+    const run = await deps.store.load(id).catch(() => null);
+    const l = run?.learnings;
+    if (!run || run.orgId !== newer.orgId || l?.status !== "applied" || !l.proposals.some((p) => keys.includes(p.key))) continue;
+    run.learnings = { ...l, status: "replaced", replacedBy: newer.id };
+    run.updatedAt = new Date().toISOString();
+    await deps.store.save(run);
+  }
+}
+
 export const LearningsBody = z.object({ action: z.enum(["propose", "apply", "remove"]) });
 
 /** Propose is read-only; apply and remove write to Studio. All are short, so they run inside the request. */
@@ -296,11 +323,15 @@ export async function runLearnings(deps: ServiceDeps, runId: string, body: unkno
   await assertSameOrg(deps, run);
   // Keeps the run's record true to Studio: a new proposal would overwrite the record of a block that is saved there.
   if (action === "propose" && run.learnings?.status === "applied") throw new ApiError(409, "not_possible", "These learnings are saved in Studio; take them out first to propose again");
+  // Studio holds one ReplyIQ block per campaign: once a newer run replaced it, this run's text is no longer there.
+  if (action !== "propose" && run.learnings?.status === "replaced")
+    throw new ApiError(409, "not_possible", "A newer run saved its own block for this campaign in Studio; take it out from that run, or propose this run's text again");
   if (action !== "propose") await deps.g8.assertWriteAllowed();
   if (!claim(runId, "learnings")) throw new ApiError(409, "busy", "Another job is already working on this run");
   try {
     const ldeps = { g8: deps.g8, store: deps.store, log: deps.log };
     const result = action === "propose" ? await proposeLearnings(ldeps, runId) : action === "apply" ? await applyLearnings(ldeps, runId) : await removeLearnings(ldeps, runId);
+    if (action === "apply" && result.status === "applied") await markReplaced(deps, run, result.proposals.map((p) => p.key));
     return stripLearnings(result)!;
   } finally {
     release(runId);

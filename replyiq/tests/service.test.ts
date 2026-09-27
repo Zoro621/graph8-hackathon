@@ -193,6 +193,43 @@ describe("learnings and summaries", () => {
     expect((await store.load(runId))!.learnings!.status).toBe("applied");
   });
 
+  it("saving a run's learnings marks an older run's block for the same campaign as replaced", async () => {
+    const d = deps();
+    const older = await startRun(d, { sequenceId: "seqA", writeTags: false }).then(async ({ runId }) => (await drain(), runId));
+    const newer = await startRun(d, { sequenceId: "seqA", writeTags: false }).then(async ({ runId }) => (await drain(), runId));
+    const proposal = { docId: "mh", docName: "Messaging House", kind: "messaging" as const, key: "seqA", section: "S", action: "append" as const };
+    const applied = { status: "applied" as const, proposedAt: "t", appliedAt: "t", proposals: [proposal] };
+    await store.save({ ...(await store.load(older))!, learnings: applied });
+    await store.save({ ...(await store.load(newer))!, learnings: { status: "proposed", proposedAt: "t", proposals: [proposal] } });
+    const studio = new Map([["mh", { id: "mh", displayName: "Messaging House", content: "Company text.", version: 3 }]]);
+    const g8 = fakeOrg({
+      getGlobalDoc: async (id: string) => ({ ...studio.get(id)! }),
+      updateGlobalDoc: async (id: string, content: string) => void studio.set(id, { ...studio.get(id)!, content, version: studio.get(id)!.version + 1 }),
+    });
+    expect((await runLearnings(deps(g8), newer, { action: "apply" })).status).toBe("applied");
+    expect((await store.load(older))!.learnings).toMatchObject({ status: "replaced", replacedBy: newer });
+    // The older run can no longer take out (or re-save) what is now the newer run's block.
+    for (const action of ["remove", "apply"]) expect(await runLearnings(deps(g8), older, { action }).catch((e) => e)).toMatchObject({ status: 409, code: "not_possible" });
+  });
+
+  it("a pipeline crash (the run can't be saved) marks the run failed instead of leaving it running", async () => {
+    const d = deps();
+    // The pipeline's final save fails (e.g. a Windows file lock that outlasts the retries).
+    const flaky: RunStore = {
+      ...store,
+      save: async (r) => {
+        if (r.status === "done") throw new Error("EPERM: operation not permitted, rename");
+        return store.save(r);
+      },
+    };
+    const { runId } = await startRun({ ...d, store: flaky }, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    const run = await getRunView(d, runId);
+    expect(run.status).toBe("failed");
+    expect(run.errors.join()).toMatch(/run stopped: .*EPERM/);
+    expect(run.job).toBeNull();
+  });
+
   it("summarises recent runs", async () => {
     const d = deps();
     await startRun(d, { sequenceId: "seqA", writeTags: false });
