@@ -20,7 +20,11 @@ OPENAI_REASON_MODEL=gpt-6-luna
 ENABLE_LAUNCH=false                  # stays off until a sandbox mailbox exists
 MIN_GROUP_SIZE=2
 G8_SEQUENCE_OWNER_EMAIL=              # optional: owner of follow-up sequences (default: the original sequence's owner)
+# Serverless hosts only (Vercel): runs and the job lock live in Upstash Redis. Locally, leave these out.
+KV_REST_API_URL=                     # set by Vercel's Upstash integration (prefix KV)
+KV_REST_API_TOKEN=
 ```
+On Vercel, set the project's Root Directory to `replyiq`, connect Upstash Redis from the Storage tab, and add the keys above as environment variables. The repo's [README](../README.md) has the full steps.
 Then:
 ```bash
 npm run check-env
