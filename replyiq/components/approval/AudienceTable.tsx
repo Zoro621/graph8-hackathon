@@ -43,6 +43,19 @@ export default function AudienceTable({ group, runExcluded }: { group: GroupView
         </div>
       )}
 
+      {!draftAudience.length && group.draft?.status === "failed" && group.draft.audienceNotes.length > 0 && (
+        <div>
+          <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-amber">Last draft attempt · no list created</p>
+          <ul className="surface divide-y divide-line overflow-hidden rounded-2xl">
+            {group.draft.audienceNotes.map((n) => (
+              <li key={n} className="px-4 py-3 text-xs leading-relaxed text-muted">
+                {n}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {referral && !draftAudience.length && (
         <div>
           <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-aqua">People they pointed to</p>

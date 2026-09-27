@@ -53,8 +53,10 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
   const busyElsewhere = Boolean(run.job) && !jobHere;
   const draftable = group.draftable.ok;
   const referral = groupKey === "referral_wrong_person";
-  // Before a draft exists, the server's own count: distinct named people for referrals, eligible contacts otherwise.
-  const audienceSize = draft?.audience.length || group.draftable.targets;
+  // The number and its label switch together: the draft's list once it has one; otherwise (no draft yet, or one that
+  // stopped short of a list) the server's preflight count, labelled as what it is.
+  const onList = draft?.audience.length ?? 0;
+  const [audienceLabel, audienceSize] = onList > 0 ? ["On the list", onList] : [referral ? "Named people" : "Eligible", group.draftable.targets];
   const runExcluded = run.groups.reduce((n, g) => n + g.excluded.length, 0);
   const revisit = [...new Set(group.replies.map((r) => r.revisitHint).filter(Boolean))] as string[];
   const current: Tab = tab ?? (draft?.sequence ? "emails" : group.card ? "card" : "audience");
@@ -150,7 +152,7 @@ export default function ApprovalView({ runId, groupKey }: { runId: string; group
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="flex items-center gap-1.5 text-xs text-muted">
-                  <Users className="size-3.5" /> {referral ? "Named people" : "Eligible"}
+                  <Users className="size-3.5" /> {audienceLabel}
                 </p>
                 <p className="mt-1 text-3xl font-semibold tabular-nums">
                   <Counter value={audienceSize} />
