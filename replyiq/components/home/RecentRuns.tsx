@@ -4,12 +4,13 @@ import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import type { RunSummary } from "@/lib/api-types";
 import { meta } from "@/lib/ui/categories";
-import { displayName, timeAgo } from "@/lib/ui/format";
+import { splitName, timeAgo } from "@/lib/ui/format";
 import { useSpotlight } from "../ui/primitives";
 
 function RunCard({ run, now, i }: { run: RunSummary; now: number; i: number }) {
   const onMove = useSpotlight<HTMLAnchorElement>();
   const total = run.groups.reduce((a, g) => a + g.count, 0) || 1;
+  const name = splitName(run.name || "Loading source…");
   const top = [...run.groups].sort((a, b) => b.count - a.count).slice(0, 3);
   const working = run.status === "running" && run.job;
   const statusLabel = run.status === "done" ? "Complete" : run.status === "failed" ? "Failed" : working ? "Analysing" : "Interrupted";
@@ -24,7 +25,10 @@ function RunCard({ run, now, i }: { run: RunSummary; now: number; i: number }) {
           </span>
           <span className="text-dim">{timeAgo(Date.parse(run.createdAt), now)}</span>
         </div>
-        <h4 className="text-[15px] font-medium leading-snug text-text">{displayName(run.name || "Loading source…")}</h4>
+        <div>
+          <h4 className="text-[15px] font-medium leading-snug text-text">{name.title}</h4>
+          {name.tags.length > 0 && <p className="mt-1 text-[11px] text-iris">{name.tags.join(" · ")}</p>}
+        </div>
         <div className="flex h-1.5 w-full gap-0.5 overflow-hidden rounded-full bg-white/5">
           {run.groups.map((g) => (
             <span key={g.key} className="h-full rounded-full" style={{ width: `${(g.count / total) * 100}%`, background: meta(g.key).color }} title={`${meta(g.key).label}: ${g.count}`} />

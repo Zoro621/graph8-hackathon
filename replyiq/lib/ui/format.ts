@@ -1,5 +1,21 @@
-/** "[DEMO] Product introduction history" → "Product introduction history". Strips any leading [tags]. */
-export const displayName = (name: string) => name.replace(/^(\s*\[[^\]]*\]\s*)+/, "").trim() || name;
+const HIDDEN_TAGS = /^(demo|synthetic)$/i;
+
+/**
+ * Splits graph8's bracketed name prefixes from the name. "[DEMO]" / "[SYNTHETIC]" are dropped; other
+ * prefixes ("[Full copy]", "[Hackathon copy]") are kept as tags because they tell look-alike sources apart.
+ */
+export function splitName(name: string): { title: string; tags: string[] } {
+  const tags: string[] = [];
+  const title = name.replace(/^(\s*\[([^\]]*)\]\s*)+/, (prefix) => {
+    for (const m of prefix.matchAll(/\[([^\]]*)\]/g)) if (m[1].trim() && !HIDDEN_TAGS.test(m[1].trim())) tags.push(m[1].trim());
+    return "";
+  });
+  // graph8 names sequences pushed from a Studio campaign "<campaign> - Sequence"; the suffix adds nothing.
+  return { title: title.replace(/\s+-\s+Sequence$/i, "").trim() || name, tags };
+}
+
+/** "[DEMO] Product introduction history" → "Product introduction history" (prefixes removed). */
+export const displayName = (name: string) => splitName(name).title;
 
 /** "just now", "4 min ago", "2 h ago", "3 d ago", then a date. */
 export function timeAgo(ts: number, now: number) {
