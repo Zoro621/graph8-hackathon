@@ -207,6 +207,11 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
   if (!allowsFollowUpCampaign(groupKey)) throw new ApiError(409, "not_possible", `"${group.label}" never gets a follow-up campaign (${categoryInfo(groupKey).followUp})`);
   if (run.steps.resolve !== "done") throw new ApiError(409, "not_possible", "The run's audience was not resolved; run the analysis again first");
   if (input.action !== "create" && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
+  // Same preflight the UI shows, so a direct request can't start a draft that is bound to fail.
+  if (input.action === "create") {
+    const d = draftability(run, group, deps.env.MIN_GROUP_SIZE);
+    if (!d.ok) throw new ApiError(409, "not_possible", d.reason ?? "This group can't be drafted");
+  }
   await deps.g8.assertWriteAllowed();
   if (!claim(runId, "draft", groupKey)) throw new ApiError(409, "busy", "Another job is already working on this run");
 

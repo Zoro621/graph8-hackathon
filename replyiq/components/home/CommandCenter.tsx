@@ -210,7 +210,7 @@ export default function CommandCenter() {
             transition={{ delay: 1.1 }}
           >
             {[
-              { v: repliesWaiting, l: "replies waiting in your graph8 org" },
+              { v: repliesWaiting, l: "prospect replies across your sequences" },
               { v: REASONS, l: "reasons ReplyIQ separates" },
               { v: 0, l: "emails ReplyIQ ever sends" },
             ].map((s) => (
@@ -295,7 +295,7 @@ export default function CommandCenter() {
         {statusState === "setup" ? (
           <StateNotice kind="setup" compact />
         ) : statusState === "error" ? (
-          <StateNotice kind="error" compact title={status?.error ? "Couldn't reach graph8" : "Couldn't reach the ReplyIQ server"} detail={statusMessage} />
+          <StateNotice kind="error" compact title={statusError ? "Couldn't reach the ReplyIQ server" : "Couldn't reach graph8"} detail={statusMessage} />
         ) : statusState === "loading" ? (
           <div className="grid gap-5 lg:grid-cols-2">
             {[0, 1].map((i) => (

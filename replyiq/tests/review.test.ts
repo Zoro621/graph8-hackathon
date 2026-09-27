@@ -75,3 +75,11 @@ describe("PR #2 review fixes", () => {
     expect(connectionState({ ...base, write: { allowed: true, via: "sandbox", orgId: "o" } }).state).toBe("live");
   });
 });
+
+describe("PR #2 re-review fixes", () => {
+  it("a failed refetch wins over the last good status the cache keeps", async () => {
+    const { connectionState } = await import("../lib/ui/connection");
+    const stale = { configured: true, missing: [], launchEnabled: false, minGroupSize: 2, write: { allowed: true as const, via: "sandbox" as const, orgId: "o" } };
+    expect(connectionState(stale, { message: "Can't reach the ReplyIQ server" })).toEqual({ state: "error", message: "Can't reach the ReplyIQ server" });
+  });
+});

@@ -143,6 +143,16 @@ describe("startDraft guards", () => {
     expect(tasks).toHaveLength(0);
   });
 
+  it("applies the draftability preflight to direct requests (nothing scheduled)", async () => {
+    const d = { ...deps(), env: { ...deps().env, MIN_GROUP_SIZE: 3 } };
+    const runId = await finishedRun(d);
+    const err = await startDraft(d, runId, "pricing_request", {}).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.message).toMatch(/at least 3 eligible contacts/);
+    expect(tasks).toHaveLength(0);
+  });
+
   it("maps a refused write to 403 before anything is scheduled", async () => {
     const d = deps(
       fakeOrg({
