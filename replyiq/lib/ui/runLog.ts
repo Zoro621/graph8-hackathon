@@ -23,6 +23,8 @@ const EXCLUSION_LABEL: Record<string, string> = {
   suppression_unknown: "suppression unknown",
   not_found: "not in CRM",
   no_followup_category: "no follow-up",
+  said_no_on_call: "said no on a call",
+  booked_on_call: "booked on a call",
 };
 
 function stepLines(run: RunView, step: StepName): Omit<LogLine, "step" | "agent">[] {
@@ -61,6 +63,7 @@ function stepLines(run: RunView, step: StepName): Omit<LogLine, "step" | "agent"
       }
       break;
     case "resolve":
+      if (run.channels?.calls.status === "ok") add(`Dialer: ${plural(run.channels.calls.contacts.length, "person", "people")} who replied were also called`);
       if (run.audience) {
         add(`${plural(run.audience.eligible, "contact")} eligible for a follow-up`, "ok");
         const ex = Object.entries(run.audience.excluded).filter(([, n]) => n);

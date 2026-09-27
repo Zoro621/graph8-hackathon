@@ -13,6 +13,8 @@ export const REASON: Record<ExclusionReason, { label: string; color: string }> =
   suppression_unknown: { label: "suppression check failed", color: "#ffb547" },
   not_found: { label: "not in the CRM", color: "#ffb547" },
   no_followup_category: { label: "no follow-up for this reason", color: "#8d93ab" },
+  said_no_on_call: { label: "said no on a call", color: "#ff5d7a" },
+  booked_on_call: { label: "booked on a call", color: "#4fe3d1" },
 };
 
 export default function AudienceTable({ group, runExcluded }: { group: GroupView; runExcluded: number }) {

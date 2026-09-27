@@ -9,6 +9,7 @@ import type { Run, StepName } from "../types";
 import { classifyReplies } from "./classify";
 import { groupReplies } from "./group";
 import { discoverThemes } from "./themes";
+import { loadChannels } from "./channels";
 import { resolveContacts } from "./resolveContacts";
 import { generateCards, wantsCard } from "./cards";
 import type { SourceDoc } from "./retrieve";
@@ -163,7 +164,11 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
 
     // Who may get a follow-up campaign. Critical for safety: a failure fails the run.
     await step("resolve", async () => {
-      const res = await resolveContacts(deps.g8, run.groups);
+      // The other Engage channels first: a "no" on a call is a hard stop here too.
+      run.channels = await loadChannels(deps.g8, run, now());
+      run.errors.push(...run.channels.errors.map((e) => `channels: ${e}`));
+      if (run.channels.calls.status === "unavailable") run.errors.push("channels: dialer outcomes unavailable, so a 'not interested' on a call could not be applied; the draft re-checks it");
+      const res = await resolveContacts(deps.g8, run.groups, { callStops: run.channels.calls });
       run.groups = res.groups;
       run.audience = { eligible: res.eligible, excluded: res.excluded };
       run.errors.push(...res.warnings.map((w) => `resolve: ${w}`));

@@ -2,7 +2,9 @@
 // Excluded, in this order of precedence:
 //   hard_no / unsubscribe      - said so in this thread
 //   hard_stop_elsewhere        - the same contact said no / unsubscribe in ANY other thread of the run
-//   not_found                  - no graph8 contact (by id from the inbox, else by email lookup)
+//   said_no_on_call            - said "not interested" / "do not call" on a dialer call (channels.ts)
+//   booked_on_call             - booked a meeting on a call: the follow-up isn't needed
+//   not_found                 - no graph8 contact (by id from the inbox, else by email lookup)
 //   suppression_unknown        - the suppression check failed: never assume "not suppressed"
 //   suppressed                 - on graph8's suppression ledger (any channel)
 //   no_followup_category       - meeting booked, meeting request (goes to a rep), needs review
@@ -29,7 +31,13 @@ async function mapLimit<T>(items: T[], limit: number, fn: (x: T) => Promise<void
   }));
 }
 
-export async function resolveContacts(client: ResolveClient, groups: Group[], opts: { concurrency?: number } = {}): Promise<ResolveOutcome> {
+export async function resolveContacts(
+  client: ResolveClient,
+  groups: Group[],
+  opts: { concurrency?: number; callStops?: { saidNo: Iterable<number>; booked: Iterable<number> } } = {},
+): Promise<ResolveOutcome> {
+  const saidNoOnCall = new Set(opts.callStops?.saidNo ?? []);
+  const bookedOnCall = new Set(opts.callStops?.booked ?? []);
   const warnings: string[] = [];
   const replies = groups.flatMap((g) => g.replies);
   const limit = opts.concurrency ?? CONCURRENCY;
@@ -82,6 +90,8 @@ export async function resolveContacts(client: ResolveClient, groups: Group[], op
       let reason: ExclusionReason | null = null;
       if (isHardStop(r.category)) reason = r.category as ExclusionReason;
       else if ((contactId && stoppedIds.has(contactId)) || (email && stoppedEmails.has(email.toLowerCase()))) reason = "hard_stop_elsewhere";
+      else if (contactId && saidNoOnCall.has(contactId)) reason = "said_no_on_call";
+      else if (contactId && bookedOnCall.has(contactId)) reason = "booked_on_call";
       else if (!contactId) reason = "not_found";
       else if (suppression.get(contactId) === undefined) reason = "suppression_unknown";
       else if (suppression.get(contactId)) reason = "suppressed";

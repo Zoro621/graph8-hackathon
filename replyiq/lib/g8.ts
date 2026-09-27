@@ -238,8 +238,45 @@ export interface CampaignMetrics {
   sequence_count?: number;
 }
 
+/** GET /sequences/{id}/reports (only the fields ReplyIQ reads). */
+export interface SequenceReport {
+  overview?: { total_contacts?: number; reply_rate?: number; meetings_booked?: number; meeting_booked_rate?: number };
+  step_breakdown?: { step_order?: number; step_type?: string; step_name?: string; status_counts?: Record<string, number> }[];
+}
+
+/** One dialer call outcome from /voice/call-results/search (only the fields ReplyIQ reads). */
+export interface CallResult {
+  id?: string | number;
+  contact_id?: number | string | null;
+  disposition?: string | null;
+  summary?: string | null;
+  sentiment?: string | null;
+  transcript?: unknown;
+  call_evaluation_result?: unknown;
+  call_start_date?: string | null;
+  created_at?: string | null;
+}
+
+/** A recorded meeting (GET /inbox/meetings). */
+export interface MeetingItem {
+  id?: string | number;
+  contact_id?: number | null;
+  title?: string | null;
+  status?: string | null;
+  analysis?: { summary?: string; objections?: string[]; next_steps?: string[] } | null;
+  key_topics?: string[] | null;
+}
+
+/** A booked appointment (GET /appointments/bookings). */
+export interface BookingItem {
+  uid?: string;
+  status?: string | null;
+  sequence_id?: string | null;
+  attendees?: { email?: string; no_show?: boolean }[];
+}
+
 /** Document text from a campaign document (content may sit top-level or in meta_data). */
-export const docText = (d: CampaignDocument | undefined) => d?.content ?? d?.meta_data?.content ?? "";
+export const docText =(d: CampaignDocument | undefined) => d?.content ?? d?.meta_data?.content ?? "";
 
 interface Envelope<T> {
   data: T;
@@ -543,6 +580,40 @@ export function createG8Client(opts: G8ClientOptions) {
     getCampaignFull: (id: string) => get<CampaignFull>(`/campaigns/${encodeURIComponent(id)}/full`),
     getCampaignMetrics: (id: string, days = 30) =>
       get<CampaignMetrics>(`/campaigns/${encodeURIComponent(id)}/metrics`, { days }),
+
+    /** Take contacts out of a list (e.g. when a newer run's audience replaces an adopted draft's). Guarded write. */
+    removeContactsFromList: (listId: number, contactIds: number[]) => client.write("DELETE", `/lists/${listId}/contacts`, { contact_ids: contactIds }),
+    /** Update a campaign's content fields (brief, hook, persona...). Guarded write; never launches. */
+    updateCampaign: (id: string, fields: Partial<Pick<CampaignCreateBody, "brief" | "core_concept" | "primary_hook" | "target_persona" | "goal">>) =>
+      client.write<Record<string, unknown>>("PATCH", `/campaigns/${encodeURIComponent(id)}`, fields),
+
+    // ---------- other Engage channels (read-only) ----------
+    /** A sequence's full report: overview, per-step funnel, engagement. */
+    getSequenceReport: (id: string) => get<SequenceReport>(`/sequences/${encodeURIComponent(id)}/reports`),
+    /** Dialer call outcomes, newest first. READ-ONLY despite the POST; filters by disposition, paged. */
+    async searchCallResults(q: { dispositions?: string[]; page?: number; pageSize?: number } = {}): Promise<CallResult[]> {
+      const body = { ...(q.dispositions ? { dispositions: q.dispositions } : {}), page: q.page ?? 1, page_size: q.pageSize ?? 100 };
+      const data = (await call<Envelope<{ items?: CallResult[]; call_results?: CallResult[] }>>("/voice/call-results/search", { method: "POST", body }, true)).data;
+      return data?.items ?? data?.call_results ?? [];
+    },
+    /** Recorded meetings with their analysis (objections, next steps). */
+    async listMeetings(limit = 50): Promise<MeetingItem[]> {
+      const data = await get<{ items?: MeetingItem[]; meetings?: MeetingItem[] } | MeetingItem[]>("/inbox/meetings", { limit });
+      return Array.isArray(data) ? data : (data?.items ?? data?.meetings ?? []);
+    },
+    /** Booked appointments; each carries the sequence it came from and no-show flags. */
+    async listBookings(take = 100): Promise<BookingItem[]> {
+      const data = await get<{ items?: BookingItem[]; bookings?: BookingItem[] } | BookingItem[]>("/appointments/bookings", { take });
+      return Array.isArray(data) ? data : (data?.items ?? data?.bookings ?? []);
+    },
+    async countNurtures(): Promise<number> {
+      const data = await get<{ nurtures?: unknown[]; total?: number }>("/nurtures");
+      return data?.total ?? data?.nurtures?.length ?? 0;
+    },
+    async countNewsletters(): Promise<number> {
+      const data = await get<unknown[] | { items?: unknown[]; total?: number }>("/newsletters");
+      return Array.isArray(data) ? data.length : (data?.total ?? data?.items?.length ?? 0);
+    },
 
     // ---------- sequences: extras ----------
     async getSequenceChannels(id: string): Promise<{ channel_type?: string; channel_value?: string; channel_id?: number }[]> {
