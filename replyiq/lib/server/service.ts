@@ -142,10 +142,14 @@ const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefin
 /**
  * Same rules as draftCampaign: a follow-up category, a resolved audience, and at least `min` targets.
  * Referrals target the people named in the replies (looked up in the CRM at draft time), not the sender.
+ * The draft looks each name up within that reply's company, so a name counts once per company. This is an
+ * upper bound: the draft still enforces the minimum on the contacts it actually finds.
  */
 export function draftability(run: Pick<Run, "steps">, g: Group, min: number): Draftability {
   const referral = g.key === "referral_wrong_person";
-  const targets = referral ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map(nameKey))).size : g.eligible.length;
+  const targets = referral
+    ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size
+    : g.eligible.length;
   if (!allowsFollowUpCampaign(g.key)) return { ok: false, targets, reason: `${g.label} never gets a follow-up campaign` };
   if (run.steps.resolve !== "done") return { ok: false, targets, reason: "The audience has not been checked yet" };
   if (targets < min)

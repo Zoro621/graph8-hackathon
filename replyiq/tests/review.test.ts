@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assertSameOrigin } from "../lib/server/origin";
 import { draftability } from "../lib/server/service";
 import { splitName } from "../lib/ui/format";
@@ -62,6 +62,35 @@ describe("PR #2 review fixes", () => {
       excluded: [],
     } as unknown as Group;
     expect(draftability({ steps: { resolve: "done" } } as never, g, 2)).toMatchObject({ ok: false, targets: 1 });
+  });
+
+  it("the same name at two companies is two referral targets (the draft looks names up per company)", () => {
+    const g = {
+      key: "referral_wrong_person",
+      label: "Referral",
+      replies: [
+        { referredName: "John Smith", company: "Acme" },
+        { referredName: "John Smith", company: "Globex" },
+        { referredName: "john  smith", company: "acme" },
+      ],
+      eligible: [],
+      excluded: [],
+    } as unknown as Group;
+    expect(draftability({ steps: { resolve: "done" } } as never, g, 2)).toMatchObject({ ok: true, targets: 2 });
+  });
+
+  it("x-forwarded-host is only trusted on Vercel, which overwrites it", () => {
+    const forged = { "content-type": "application/json", origin: "https://evil.example", "x-forwarded-host": "evil.example", host: "localhost:3000" };
+    expect(() => assertSameOrigin(req(forged))).toThrow(/only accepted/);
+    const proxied = { "content-type": "application/json", origin: "https://replyiq.vercel.app", "x-forwarded-host": "replyiq.vercel.app", host: "internal:3000" };
+    expect(() => assertSameOrigin(req(proxied))).toThrow(/only accepted/);
+    vi.stubEnv("VERCEL", "1");
+    try {
+      expect(() => assertSameOrigin(req(proxied))).not.toThrow();
+      expect(() => assertSameOrigin(req({ ...proxied, origin: "https://evil.example" }))).toThrow(/only accepted/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("a configured server that can't reach graph8 is an error, not healthy", async () => {
