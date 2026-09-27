@@ -44,3 +44,34 @@ describe("splitName", () => {
     expect(splitName("[Hackathon copy] Kill Your Tool Stack — Tech SMB Sales v2 - Sequence").tags).toEqual(["Hackathon copy"]);
   });
 });
+
+describe("PR #2 review fixes", () => {
+  it("one-line labels keep the tags that tell look-alike sources apart", async () => {
+    const { displayName } = await import("../lib/ui/format");
+    expect(displayName("[Full copy] Kill Your Tool Stack v2 - Sequence")).toBe("Kill Your Tool Stack v2 · Full copy");
+    expect(displayName("[Hackathon copy] Kill Your Tool Stack v2 - Sequence")).toBe("Kill Your Tool Stack v2 · Hackathon copy");
+    expect(displayName("[DEMO] Product introduction history")).toBe("Product introduction history");
+  });
+
+  it("referral names that differ only in spacing or case are one target, like in the draft", () => {
+    const g = {
+      key: "referral_wrong_person",
+      label: "Referral",
+      replies: [{ referredName: "Kurt Huegin" }, { referredName: "Kurt  Huegin" }, { referredName: "kurt huegin" }],
+      eligible: [],
+      excluded: [],
+    } as unknown as Group;
+    expect(draftability({ steps: { resolve: "done" } } as never, g, 2)).toMatchObject({ ok: false, targets: 1 });
+  });
+
+  it("a configured server that can't reach graph8 is an error, not healthy", async () => {
+    const { connectionState } = await import("../lib/ui/connection");
+    const base = { configured: true, missing: [], launchEnabled: false, minGroupSize: 2 };
+    expect(connectionState(undefined).state).toBe("loading");
+    expect(connectionState(undefined, { message: "Can't reach the ReplyIQ server" }).state).toBe("error");
+    expect(connectionState({ ...base, configured: false, missing: ["G8_API_KEY"] }).state).toBe("setup");
+    expect(connectionState({ ...base, error: "graph8 401 unauthorized" })).toEqual({ state: "error", message: "graph8 401 unauthorized" });
+    expect(connectionState({ ...base, write: { allowed: false, reason: "not allowlisted" } })).toEqual({ state: "readonly", message: "not allowlisted" });
+    expect(connectionState({ ...base, write: { allowed: true, via: "sandbox", orgId: "o" } }).state).toBe("live");
+  });
+});

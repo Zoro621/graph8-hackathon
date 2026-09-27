@@ -14,8 +14,14 @@ export function splitName(name: string): { title: string; tags: string[] } {
   return { title: title.replace(/\s+-\s+Sequence$/i, "").trim() || name, tags };
 }
 
-/** "[DEMO] Product introduction history" → "Product introduction history" (prefixes removed). */
-export const displayName = (name: string) => splitName(name).title;
+/**
+ * A one-line label: "[DEMO] Product introduction history" → "Product introduction history",
+ * "[Full copy] Kill Your Tool Stack" → "Kill Your Tool Stack · Full copy" (look-alikes stay distinct).
+ */
+export function displayName(name: string) {
+  const { title, tags } = splitName(name);
+  return tags.length ? `${title} · ${tags.join(" · ")}` : title;
+}
 
 /** "just now", "4 min ago", "2 h ago", "3 d ago", then a date. */
 export function timeAgo(ts: number, now: number) {

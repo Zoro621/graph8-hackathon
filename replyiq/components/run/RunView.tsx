@@ -16,7 +16,7 @@ import { Button, Chip, Counter, Eyebrow } from "../ui/primitives";
 import { api, isWorking, useRunView } from "@/lib/client/api";
 import { useNow } from "@/lib/client/hooks";
 import { meta } from "@/lib/ui/categories";
-import { clockTime, displayName } from "@/lib/ui/format";
+import { clockTime, splitName } from "@/lib/ui/format";
 import { runLog } from "@/lib/ui/runLog";
 import { STEP_ORDER } from "@/lib/ui/theme";
 import type { ReplyView, RunView as Run } from "@/lib/api-types";
@@ -68,6 +68,7 @@ export default function RunView({ runId }: { runId: string }) {
   const finished = STEP_ORDER.filter((s) => ["done", "skipped", "failed"].includes(run.steps[s])).length;
   const progress = run.status === "running" ? finished / STEP_ORDER.length : 1;
   const started = Date.parse(run.createdAt);
+  const sourceName = splitName(run.source.name || "Loading source…");
   const elapsed = ((working && now ? now : Date.parse(run.updatedAt)) - started) / 1000;
   const classified = replies.length;
   const total = run.counts.prospectReplies;
@@ -96,7 +97,14 @@ export default function RunView({ runId }: { runId: string }) {
       <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div>
           <Eyebrow>Run · started {clockTime(started)}</Eyebrow>
-          <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">{displayName(run.source.name || "Loading source…")}</h1>
+          <h1 className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">
+            {sourceName.title}
+            {sourceName.tags.map((t) => (
+              <Chip key={t} color="#9b8cff">
+                {t}
+              </Chip>
+            ))}
+          </h1>
           <p className="mt-1.5 text-sm text-muted">
             {run.steps.fetch === "done" ? `${run.counts.prospectReplies} replies · ${run.counts.threads} threads` : "Fetching replies…"}
             {run.source.sequences.length > 1 && ` · ${run.source.sequences.length} sequences`}
