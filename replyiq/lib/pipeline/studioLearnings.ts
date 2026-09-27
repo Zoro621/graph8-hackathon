@@ -55,6 +55,14 @@ export function removeBlock(content: string, key: string): { next: string; remov
   return { next: after ? `${before}\n${after}` : before, removed: true };
 }
 
+/** The text between ReplyIQ's markers for `key` ("" when there is no block). */
+export function blockText(content: string, key: string): string {
+  const i = content.indexOf(blockStart(key));
+  if (i === -1) return "";
+  const j = content.indexOf(blockEnd(key), i);
+  return content.slice(i + blockStart(key).length, j === -1 ? content.length : j);
+}
+
 /** One block per analysed source, so re-running the same campaign replaces its block instead of adding one. */
 export const learningsKey = (run: Run) => run.source.campaignId ?? ("sequenceId" in run.source.selector ? run.source.selector.sequenceId : run.id);
 
@@ -178,6 +186,19 @@ export async function removeLearnings(deps: LearningsDeps, runId: string): Promi
   if (!learnings?.proposals.length) throw new LearningsError("nothing was proposed or applied for this run");
   try {
     await deps.g8.assertWriteAllowed();
+    // Only this run's own text is taken out. If Studio's block now holds other text (another ReplyIQ app saved
+    // its block for this campaign, e.g. the deployed app next to a local one, or a person edited it), it is left
+    // as it is and this run's record says so. Checked for every document before any is changed.
+    const current = await Promise.all(learnings.proposals.map((p) => deps.g8.getGlobalDoc(p.docId)));
+    const changed = learnings.proposals.filter((p, i) => current[i].content.includes(blockStart(p.key)) && !normLoose(blockText(current[i].content, p.key)).includes(normLoose(p.section)));
+    if (changed.length) {
+      learnings.status = "replaced";
+      learnings.replacedBy = undefined;
+      learnings.error = `${changed.map((p) => p.docName).join(" and ")} now hold${changed.length === 1 ? "s" : ""} a different ReplyIQ block for this campaign (saved again elsewhere, or edited in Studio), so nothing was taken out`;
+      run.updatedAt = now();
+      await deps.store.save(run);
+      return learnings;
+    }
     for (const p of learnings.proposals) {
       const fresh = await deps.g8.getGlobalDoc(p.docId);
       const { next, removed } = removeBlock(fresh.content, p.key);

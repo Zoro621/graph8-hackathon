@@ -38,7 +38,17 @@ export default function LearningsPanel({ run }: { run: RunView }) {
         </h2>
         {l && (
           <Chip color={applied ? "#4fe3d1" : l.status === "failed" ? "#ff5d7a" : l.status === "replaced" ? "#ffb547" : "#9b8cff"}>
-            {applied ? "saved in Studio" : l.status === "removed" ? "removed" : l.status === "failed" ? "failed" : l.status === "replaced" ? "replaced by a newer run" : "proposed · not saved"}
+            {applied
+              ? "saved in Studio"
+              : l.status === "removed"
+                ? "removed"
+                : l.status === "failed"
+                  ? "failed"
+                  : l.status === "replaced"
+                    ? l.replacedBy
+                      ? "replaced by a newer run"
+                      : "saved again elsewhere"
+                    : "proposed · not saved"}
           </Chip>
         )}
       </div>
@@ -51,7 +61,12 @@ export default function LearningsPanel({ run }: { run: RunView }) {
         {!l || l.status === "removed" || l.status === "replaced" ? (
           <div className="flex flex-wrap items-center justify-between gap-4">
             <p className="text-sm text-muted">
-              {l?.status === "replaced" ? (
+              {l?.status === "replaced" && !l.replacedBy ? (
+                <>
+                  Studio&apos;s block for this campaign was saved again after this run (by another copy of ReplyIQ, such as the deployed app, or edited in Studio), so ReplyIQ left it as it
+                  is. You can propose this run&apos;s text again.
+                </>
+              ) : l?.status === "replaced" ? (
                 <>
                   A newer run saved its own block for this campaign in Studio
                   {l.replacedBy && (
