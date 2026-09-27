@@ -47,8 +47,10 @@ export default function ReplyTicker({ item, phase, source }: { item: TickerItem;
       <div className="mt-4 flex h-7 items-center gap-3">
         {showLabel ? (
           <m.div key={`l${item.id}`} className="flex min-w-0 flex-1 items-center gap-2" initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
-            <Chip color={info.color}>{info.label}</Chip>
-            <span className="truncate text-xs text-muted">{info.followUp && info.angle ? info.angle : info.note}</span>
+            <span className="shrink-0 whitespace-nowrap">
+              <Chip color={info.color}>{info.label}</Chip>
+            </span>
+            <span className="min-w-0 truncate text-xs text-muted">{info.followUp && info.angle ? info.angle : info.note}</span>
           </m.div>
         ) : (
           <div className="h-1 w-32 overflow-hidden rounded-full bg-white/5">
