@@ -31,6 +31,9 @@ This file is the build guide. [REPLYIQ-PLAN.md](REPLYIQ-PLAN.md) holds the produ
 - All 9 hints were read correctly. 8 are back already (June and July dates, a stale "March 19th", "Monday" after an 18 Sep reply). 1 gave no date ("out of the country"), so they're assumed back Fri 2 Oct, with the first email on Mon 5 Oct.
 - Created: campaign `f550d4bd…` (not launched, audience list 14), sequence `b6cf4e15…` on list 14 (8 people, step 1 waits 0 days) and sequence `61cf5d0b…` on list 15 (1 person, step 1 waits 8 days). Both are drafts with no sender, and step 2 comes 4 days after step 1.
 - graph8 stored and returned the 8-day step 1 wait. A recount re-sent graph8's own stored steps without an error, and `verifyRecordedSequence` returned no problems before and after.
+- Through the app: "Recount the waiting days" and "Re-check Studio's docs" (with the Studio doc wait from PR #10) both finished cleanly. Messaging & Objections, Reply Templates and the brief each hold one ReplyIQ section with the return-date timing.
+- `npm run e2e` after the merge: **37 passed, 2 warnings, 0 failed**. The warnings are the stale demo tags graph8 won't remove. `npm run test:live`: 21 passed.
+- **Found by the e2e, fixed:** the deployed app (runs in Redis) saved its learnings block for the OrbitDesk campaign after a local run had saved one. The local record still said "applied", and its "Take it out again" would have deleted the newer text. `removeLearnings` now writes nothing when Studio's block no longer holds the run's own text, and records it as "saved again elsewhere". Checked live: both documents stayed at version 10.
 
 **Tests:** 22 new offline tests (every real hint above, year placement, weekends, the split, the full draft → recount → spare reuse flow against a fake graph8 with real lists and sequences, the read-back naming a lost wait or a drifted list, and the API refusing a recount for other groups).
 

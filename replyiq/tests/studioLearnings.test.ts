@@ -190,6 +190,27 @@ describe("propose -> apply", () => {
     expect(blocked.status).toBe("failed");
   });
 
+  it("remove leaves a block that was saved again elsewhere (another ReplyIQ app, or an edit) and records it as replaced", async () => {
+    await store.save(makeRun([pricing()]));
+    const { g8, docs, saves } = fakeStudio();
+    await proposeLearnings({ g8, store }, "abcdefghijkl");
+    await applyLearnings({ g8, store }, "abcdefghijkl");
+    // The deployed app (its own run store) saves a newer block for the same campaign into Messaging House.
+    const mh = docs.get("mh")!;
+    const key = (await store.load("abcdefghijkl"))!.learnings!.proposals[0].key;
+    docs.set("mh", { ...mh, content: upsertBlock(mh.content, key, "## Heard in the field: newer text from another run").next, version: (mh.version ?? 0) + 1 });
+    const savesBefore = saves.length;
+    const pcBefore = docs.get("pc")!.content;
+    const r = await removeLearnings({ g8, store }, "abcdefghijkl");
+    expect(r.status).toBe("replaced");
+    expect(r.replacedBy).toBeUndefined();
+    expect(r.error).toMatch(/Messaging House now holds a different ReplyIQ block/);
+    expect(saves).toHaveLength(savesBefore); // nothing written: not even the Proof Catalog block, which still matched
+    expect(docs.get("mh")!.content).toContain("newer text from another run");
+    expect(docs.get("pc")!.content).toBe(pcBefore);
+    expect((await store.load("abcdefghijkl"))!.learnings!.status).toBe("replaced");
+  });
+
   it("apply needs a proposal and fails safely when writes are refused or the save did not stick", async () => {
     await store.save(makeRun([pricing()]));
     await expect(applyLearnings({ g8: fakeStudio().g8, store }, "abcdefghijkl")).rejects.toThrow(/nothing proposed/);

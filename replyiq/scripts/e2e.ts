@@ -14,7 +14,7 @@ import { llm } from "../lib/llm";
 import { callStops } from "../lib/pipeline/channels";
 import { draftCampaign, marker, referralTargets } from "../lib/pipeline/draftCampaign";
 import { verifyRecordedSequence } from "../lib/pipeline/followupSequence";
-import { blockStart } from "../lib/pipeline/studioLearnings";
+import { blockStart, blockText } from "../lib/pipeline/studioLearnings";
 import { runPipeline } from "../lib/pipeline/runPipeline";
 import { discoverSources, findCampaignDoc, pickDefaultSource, resolveSource } from "../lib/pipeline/sources";
 import { createFileStore } from "../lib/store";
@@ -441,15 +441,20 @@ async function main() {
     const runs = (await Promise.all((await store.list()).map((r) => store.load(r.id)))).filter((r): r is Run => Boolean(r));
     const applied = runs.filter((r) => r.learnings?.status === "applied");
     const seen: string[] = [];
+    const elsewhere: string[] = [];
     for (const r of applied) {
       for (const p of r.learnings!.proposals) {
         const doc = await client.getGlobalDoc(p.docId);
         const n = doc.content.split(blockStart(p.key)).length - 1;
         must(n === 1, `${p.docName}: ReplyIQ block appears ${n} time(s)`);
-        must(normLoose(doc.content).includes(normLoose(p.section)), `${p.docName}: the approved text changed`);
-        seen.push(`${p.docName} (v${doc.version ?? "?"})`);
+        // Apply verified its own text when it saved. Different text in the (single) block later means the block was
+        // saved again by a run this store doesn't hold (e.g. the deployed app) or edited in Studio: this record is stale.
+        if (normLoose(blockText(doc.content, p.key)).includes(normLoose(p.section))) seen.push(`${p.docName} (v${doc.version ?? "?"})`);
+        else elsewhere.push(`${p.docName} (run ${r.id}; Studio v${doc.version ?? "?"}, saved ${doc.updatedAt ?? "?"})`);
       }
     }
+    if (elsewhere.length)
+      return { status: "warn", detail: `saved again since these local runs applied them (another ReplyIQ app such as the deployed one, or an edit in Studio); each block is still there once and "Take them out" on the stale run leaves it alone: ${elsewhere.join(", ")}` };
     return { status: seen.length ? "pass" : "info", detail: seen.length ? `approved blocks present once in: ${seen.join(", ")}` : "no learnings applied" };
   });
 
