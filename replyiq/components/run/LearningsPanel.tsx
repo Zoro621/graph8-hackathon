@@ -61,8 +61,9 @@ export default function LearningsPanel({ run }: { run: RunView }) {
                 <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 text-sm">
                   <span className="font-medium text-text">{p.docName}</span>
                   <span className="font-mono text-[11px] text-dim">
-                    {p.action === "append" ? "adds a new block" : p.action === "replace" ? "replaces ReplyIQ's block" : "no change"}
-                    {p.savedVersion != null ? ` · version ${p.savedVersion}` : p.baseVersion != null ? ` · now version ${p.baseVersion}` : ""}
+                    {applied
+                      ? `${p.action === "append" ? "added a new block" : p.action === "replace" ? "replaced ReplyIQ's block" : "already up to date"}${p.savedVersion != null ? ` · saved as version ${p.savedVersion}` : ""}`
+                      : `${p.action === "append" ? "adds a new block" : p.action === "replace" ? "replaces ReplyIQ's block" : "no change"}${p.baseVersion != null ? ` · Studio has version ${p.baseVersion}` : ""}`}
                   </span>
                 </div>
                 <pre className="thin-scroll max-h-72 overflow-auto whitespace-pre-wrap p-4 font-sans text-[13px] leading-relaxed text-muted">{p.section}</pre>
@@ -75,7 +76,7 @@ export default function LearningsPanel({ run }: { run: RunView }) {
                   <p className="flex items-center gap-2 text-sm text-aqua">
                     <CheckCircle2 className="size-4" /> Saved to Studio and read back to verify.
                   </p>
-                  <Button variant="ghost" onClick={() => act("remove")} disabled={!!busy}>
+                  <Button variant="ghost" onClick={() => act("remove")} disabled={!!busy || !!run.job}>
                     {busy === "remove" ? <Loader2 className="size-4 animate-spin" /> : <Undo2 className="size-4" />} Take it out again
                   </Button>
                 </m.div>

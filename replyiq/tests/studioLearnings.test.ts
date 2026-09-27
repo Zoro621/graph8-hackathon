@@ -145,6 +145,16 @@ describe("propose -> apply", () => {
     expect((await store.load("abcdefghijkl"))?.learnings?.status).toBe("proposed");
   });
 
+  it("propose reads each document itself: graph8's list has no save counter (it always says version 1)", async () => {
+    await store.save(makeRun([pricing()]));
+    const { g8 } = fakeStudio();
+    const listed = await g8.listGlobalDocs();
+    g8.listGlobalDocs = async () => listed.map((d) => ({ ...d, version: 1 }));
+    g8.getGlobalDoc = async (id: string) => ({ ...listed.find((d) => d.id === id)!, version: 6 });
+    const l = await proposeLearnings({ g8, store }, "abcdefghijkl");
+    expect(l.proposals.map((p) => p.baseVersion)).toEqual([6, 6]);
+  });
+
   it("apply saves exactly the proposal into the fresh document, keeps others' edits, verifies, records versions", async () => {
     await store.save(makeRun([pricing()]));
     const { g8, docs, saves } = fakeStudio();
