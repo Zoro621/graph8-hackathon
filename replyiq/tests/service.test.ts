@@ -7,8 +7,9 @@ import { WriteNotAllowedError } from "../lib/g8";
 import { createFileStore, type RunStore } from "../lib/store";
 import { emptyRun } from "../lib/pipeline/runPipeline";
 import { claim, resetJobs } from "../lib/server/jobs";
-import { ApiError, getRunView, listRunSummaries, runLearnings, startDraft, startRun, toApiError, toRunView, type ServiceDeps } from "../lib/server/service";
+import { ApiError, getOriginal, getRunView, listRunSummaries, runLearnings, startDraft, startRun, toApiError, toRunView, type ServiceDeps } from "../lib/server/service";
 import { runLog } from "../lib/ui/runLog";
+import type { CampaignDraft } from "../lib/types";
 import { fakeLlm, label } from "./helpers";
 
 const thread = (id: string, text: string, contactId: number): Thread => ({
@@ -237,6 +238,103 @@ describe("learnings and summaries", () => {
     const [s] = await listRunSummaries(d);
     expect(s).toMatchObject({ status: "done", name: "[DEMO] Seq A", replies: 3, job: null });
     expect(s.draftable).toBe(1); // pricing (2 eligible); unsubscribe never
+  });
+});
+
+describe("rewrite, takeover and V1", () => {
+  async function doneRun(d: ServiceDeps) {
+    const { runId } = await startRun(d, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    return runId;
+  }
+  const readyDraft = (over: Record<string, unknown> = {}) => ({
+    status: "ready" as const,
+    listId: 77,
+    campaignId: "camp-1",
+    campaignName: "ReplyIQ · Pricing request follow-up",
+    audience: [{ contactId: 101, email: "t1@example.com", threadId: "t1" }],
+    audienceNotes: [],
+    docsPatched: ["messaging_objections"],
+    docsPending: [],
+    docsFailed: [],
+    generation: "complete" as const,
+    warnings: [],
+    createdAt: "2026-09-27T10:00:00.000Z",
+    updatedAt: "2026-09-27T10:00:00.000Z",
+    ...over,
+  });
+  async function withDraft(runId: string, draft: CampaignDraft) {
+    const run = (await store.load(runId))!;
+    run.groups.find((g) => g.key === "pricing_request")!.draft = draft;
+    await store.save(run);
+  }
+
+  it("rewrite needs follow-up emails to rewrite", async () => {
+    const d = deps();
+    const runId = await doneRun(d);
+    await withDraft(runId, readyDraft());
+    expect(await startDraft(d, runId, "pricing_request", { action: "rewrite" }).catch((e) => e)).toMatchObject({ status: 409, message: expect.stringMatching(/no follow-up emails/) });
+    await withDraft(runId, readyDraft({ sequence: { status: "ready", steps: [], instructions: "", facts: [], doNotClaim: [], originalRules: [], verified: true, senderAttached: false, warnings: [], updatedAt: "t" } }));
+    await startDraft(d, runId, "pricing_request", { action: "rewrite" });
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("offers an earlier run's draft of the same campaign, and taking it over marks the earlier copy read-only", async () => {
+    const d = deps();
+    const older = await doneRun(d);
+    await withDraft(older, readyDraft());
+    const newer = await doneRun(d);
+    const offered = (await getRunView(d, newer)).groups.find((g) => g.key === "pricing_request")!.previousDraft;
+    expect(offered).toMatchObject({ runId: older, campaignId: "camp-1", audience: 1 });
+
+    expect(toApiError(await startDraft(d, newer, "pricing_request", { action: "adopt" }).catch((e) => e)).status).toBe(400); // fromRunId required
+    await startDraft(d, newer, "pricing_request", { action: "adopt", fromRunId: older });
+    expect(tasks).toHaveLength(1); // the takeover runs in the background
+    const mine = (await store.load(newer))!.groups.find((g) => g.key === "pricing_request")!.draft!;
+    expect(mine).toMatchObject({ status: "drafting", adoptedFrom: older, campaignId: "camp-1", listId: 77 });
+    const theirs = (await store.load(older))!.groups.find((g) => g.key === "pricing_request")!.draft!;
+    expect(theirs.supersededBy).toBe(newer);
+    // The earlier copy is read-only now; it can't be taken over twice.
+    expect(await startDraft(d, older, "pricing_request", { action: "patch" }).catch((e) => e)).toMatchObject({ status: 409, code: "taken_over" });
+    const third = await doneRun(d);
+    expect(await startDraft(d, third, "pricing_request", { action: "adopt", fromRunId: older }).catch((e) => e)).toMatchObject({ status: 409, code: "taken_over" });
+    // A newer run is offered the current owner's draft, never the taken-over one.
+    await withDraft(newer, { ...mine, status: "ready" });
+    expect((await getRunView(d, third)).groups.find((g) => g.key === "pricing_request")!.previousDraft?.runId).toBe(newer);
+  });
+
+  it("takeover only within the same campaign and org, and never onto a run that has its own draft", async () => {
+    const d = deps();
+    const older = await doneRun(d);
+    await withDraft(older, readyDraft());
+    const newer = await doneRun(d);
+    expect(await startDraft(d, newer, "pricing_request", { action: "adopt", fromRunId: newer }).catch((e) => e)).toMatchObject({ status: 409 });
+    const other = (await store.load(older))!;
+    await store.save({ ...other, source: { ...other.source, selector: { sequenceId: "seqZ" } } });
+    expect(await startDraft(d, newer, "pricing_request", { action: "adopt", fromRunId: older }).catch((e) => e)).toMatchObject({ status: 409, message: expect.stringMatching(/different campaign/) });
+    await withDraft(newer, readyDraft({ campaignId: "camp-9" }));
+    expect(await startDraft(d, newer, "pricing_request", { action: "adopt", fromRunId: older }).catch((e) => e)).toMatchObject({ status: 409 });
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("V1: the original sequence's steps, read from graph8, with cumulative-ready delays and plain text", async () => {
+    const g8 = fakeOrg({
+      getSequenceSteps: async () => ({
+        sequence_id: "seqA",
+        steps: [
+          { step_order: 2, time_interval: 3 * 86_400, input_type: "MANUAL_TEMPLATE", step_data: { subject: "Bump", body: "<p>Just checking in.</p>" } },
+          { step_order: 1, time_interval: 0, input_type: "ON_DEMAND", step_data: { instructions: "Write a short intro." } },
+        ],
+      }),
+    });
+    const d = deps(g8);
+    const runId = await doneRun(d);
+    const v1 = await getOriginal(d, runId);
+    expect(v1.errors).toEqual([]);
+    expect(v1.sequences[0].steps).toEqual([
+      { order: 1, day: 0, kind: "ai", text: "Write a short intro." },
+      { order: 2, day: 3, kind: "template", subject: "Bump", text: "Just checking in." },
+    ]);
   });
 });
 

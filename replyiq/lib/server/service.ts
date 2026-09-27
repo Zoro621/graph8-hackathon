@@ -11,8 +11,20 @@ import type { CampaignDraft, Category, Group, Run, SourceSummary, StudioLearning
 import { emptyRun, runPipeline } from "../pipeline/runPipeline";
 import { discoverSources } from "../pipeline/sources";
 import { DraftError, draftCampaign, nameKey, parsePersonNames } from "../pipeline/draftCampaign";
+import { toPlainText } from "../pipeline/fetchReplies";
 import { LearningsError, applyLearnings, proposeLearnings, removeLearnings } from "../pipeline/studioLearnings";
-import { OTHER_ORG_REASON, type Draftability, type GroupView, type LearningsView, type RunSummary, type RunView, type StatusView } from "../api-types";
+import {
+  OTHER_ORG_REASON,
+  type Draftability,
+  type GroupView,
+  type LearningsView,
+  type OriginalView,
+  type PreviousDraft,
+  type RunSummary,
+  type RunView,
+  type StatusView,
+  type StepView,
+} from "../api-types";
 import { activeJob, claim, release } from "./jobs";
 
 export interface ServiceDeps {
@@ -189,20 +201,47 @@ export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, min: n
 }
 
 /** The run as the UI needs it: no full conversations, no document backups, plus live job state. */
-export function toRunView(run: Run, minGroup = 2, org?: string): RunView {
+export function toRunView(run: Run, minGroup = 2, org?: string, previous: Partial<Record<Category, PreviousDraft>> = {}): RunView {
   const job = activeJob(run.id);
   const groups: GroupView[] = run.groups.map((g) => ({
     ...g,
     replies: g.replies.map(({ conversation, ...r }) => ({ ...r, messages: conversation.length })),
     draftable: draftability(run, g, minGroup, org),
+    ...(previous[g.key] ? { previousDraft: previous[g.key] } : {}),
   }));
   const working = run.status === "running" || run.groups.some((g) => g.draft?.status === "drafting");
   return { ...run, groups, learnings: stripLearnings(run.learnings), job, interrupted: working && !job, otherOrg: fromOtherOrg(run, org) };
 }
 
+/** Runs of the same campaign (or standalone sequence) are one source: their drafts can be taken over. */
+export const sourceKey = (run: Pick<Run, "source">) => run.source.campaignId ?? ("sequenceId" in run.source.selector ? run.source.selector.sequenceId : "");
+
+/**
+ * For each group of `run` without a draft of its own: the newest earlier run's draft of that group for the
+ * same source (same org, still its own, with a campaign), which this run can take over.
+ */
+export async function previousDrafts(deps: ServiceDeps, run: Run): Promise<Partial<Record<Category, PreviousDraft>>> {
+  const open = run.groups.filter((g) => !g.draft?.campaignId && allowsFollowUpCampaign(g.key)).map((g) => g.key);
+  if (!open.length || run.status !== "done" || !sourceKey(run)) return {};
+  const out: Partial<Record<Category, PreviousDraft>> = {};
+  for (const { id } of await deps.store.list()) {
+    if (id === run.id) continue;
+    const other = await deps.store.load(id).catch(() => null);
+    if (!other || other.orgId !== run.orgId || sourceKey(other) !== sourceKey(run)) continue;
+    for (const key of open) {
+      const d = other.groups.find((g) => g.key === key)?.draft;
+      if (!d?.campaignId || !d.listId || d.supersededBy) continue;
+      if (out[key] && out[key]!.updatedAt >= d.updatedAt) continue;
+      out[key] = { runId: other.id, campaignId: d.campaignId, ...(d.campaignName ? { campaignName: d.campaignName } : {}), status: d.status, updatedAt: d.updatedAt, audience: d.audience.length };
+    }
+  }
+  return out;
+}
+
 export async function getRunView(deps: ServiceDeps, id: string): Promise<RunView> {
   const run = await loadRun(deps, id);
-  return toRunView(run, deps.env.MIN_GROUP_SIZE, await keyOrg(deps));
+  const org = await keyOrg(deps);
+  return toRunView(run, deps.env.MIN_GROUP_SIZE, org, fromOtherOrg(run, org) ? {} : await previousDrafts(deps, run));
 }
 
 /** Recent runs of the org the key opens. Runs saved with another key stay reachable by URL, read-only. */
@@ -229,11 +268,18 @@ export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<R
 
 // ---------- drafts ----------
 
-export const DraftBody = z.object({
-  /** create: list + Studio campaign + follow-up sequence. patch: add the Answer Card to docs that were still generating. previews: graph8 drafts step 1 for a few contacts. */
-  action: z.enum(["create", "patch", "previews"]).default("create"),
-  previews: z.number().int().min(0).max(3).default(0),
-});
+export const DraftBody = z
+  .object({
+    /**
+     * create: list + Studio campaign + follow-up sequence. patch: add the Answer Card to docs that were still generating.
+     * previews: graph8 drafts step 1 for a few contacts. rewrite: re-write the follow-up emails (and the channel plan)
+     * in the same Sequencer draft. adopt: take over an earlier run's draft of this group (`fromRunId`) instead of creating one.
+     */
+    action: z.enum(["create", "patch", "previews", "rewrite", "adopt"]).default("create"),
+    previews: z.number().int().min(0).max(3).default(0),
+    fromRunId: z.string().regex(/^[a-z0-9]{12}$/).optional(),
+  })
+  .refine((b) => (b.action === "adopt") === Boolean(b.fromRunId), { message: "fromRunId is required for adopt, and only for adopt" });
 
 const DRAFT_WAIT_MS = 150_000; // keeps a draft inside a 5-minute function; unfinished docs are patched later
 
@@ -248,14 +294,40 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
   if (!allowsFollowUpCampaign(groupKey))
     throw new ApiError(409, "not_possible", categoryInfo(groupKey).followUp === "rep" ? `"${group.label}" goes to a rep, not a follow-up campaign` : `"${group.label}" is never re-contacted, so it gets no follow-up campaign`);
   if (run.steps.resolve !== "done") throw new ApiError(409, "not_possible", "The run's audience was not resolved; run the analysis again first");
-  if (input.action !== "create" && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
+  if (group.draft?.supersededBy) throw new ApiError(409, "taken_over", `A newer run (${group.draft.supersededBy}) took this draft over; continue there`);
+  const fresh = input.action === "create" || input.action === "adopt";
+  if (!fresh && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
+  if (input.action === "rewrite" && group.draft?.sequence?.status !== "ready") throw new ApiError(409, "not_possible", "This draft has no follow-up emails to rewrite yet");
+  if (input.action === "adopt" && group.draft?.campaignId) throw new ApiError(409, "not_possible", "This run already has its own draft for this group");
   // Same preflight the UI shows, so a direct request can't start a draft that is bound to fail.
-  if (input.action === "create") {
+  if (fresh) {
     const d = draftability(run, group, deps.env.MIN_GROUP_SIZE);
     if (!d.ok) throw new ApiError(409, "not_possible", d.reason ?? "This group can't be drafted");
   }
+  const earlier = input.action === "adopt" ? await takeoverSource(deps, run, groupKey, input.fromRunId!) : null;
   await deps.g8.assertWriteAllowed();
   if (!claim(runId, "draft", groupKey)) throw new ApiError(409, "busy", "Another job is already working on this run");
+  if (earlier) {
+    // The earlier run is written too (marked taken over): hold its lock for that write.
+    if (!claim(earlier.run.id, "draft", groupKey)) {
+      release(runId);
+      throw new ApiError(409, "busy", "A job is working on the earlier run; try again when it finishes");
+    }
+    try {
+      const at = new Date().toISOString();
+      group.draft = { ...earlier.draft, status: "drafting", adoptedFrom: earlier.run.id, supersededBy: undefined, strategy: undefined, error: undefined, warnings: [], updatedAt: at };
+      run.updatedAt = at;
+      await deps.store.save(run);
+      earlier.group.draft = { ...earlier.draft, supersededBy: run.id, updatedAt: at };
+      earlier.run.updatedAt = at;
+      await deps.store.save(earlier.run);
+    } catch (err) {
+      release(runId);
+      throw err;
+    } finally {
+      release(earlier.run.id);
+    }
+  }
 
   deps.schedule(async () => {
     try {
@@ -274,7 +346,10 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
           runId,
           groupKey,
           patchOnly: input.action === "patch",
-          sequenceOnly: input.action === "previews",
+          sequenceOnly: input.action === "previews" || input.action === "rewrite",
+          refreshSequence: input.action === "rewrite",
+          // Resuming a takeover that stopped part-way continues it, so the earlier run's section is still replaced.
+          adopt: input.action === "adopt" || (input.action === "create" && Boolean(group.draft?.adoptedFrom)),
           previews: input.action === "previews" ? Math.max(1, input.previews) : input.previews,
         },
       );
@@ -286,6 +361,63 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
     }
   });
   return { runId, group: groupKey };
+}
+
+// ---------- the original sequence (V1), for the V1 -> V2 view ----------
+
+const ORIGINAL_TTL_MS = 5 * 60_000;
+const originalCache = new Map<string, { at: number; value: Promise<OriginalView> }>();
+
+/** The run's source sequences as they are in graph8 now: each step's delay, subject and text. Read-only, cached briefly. */
+export async function getOriginal(deps: ServiceDeps, runId: string): Promise<OriginalView> {
+  const run = await loadRun(deps, runId);
+  await assertSameOrg(deps, run);
+  const hit = originalCache.get(runId);
+  if (hit && Date.now() - hit.at < ORIGINAL_TTL_MS) return hit.value;
+  const value = (async (): Promise<OriginalView> => {
+    const errors: string[] = [];
+    const sequences: OriginalView["sequences"] = [];
+    for (const s of run.source.sequences.slice(0, 3)) {
+      try {
+        const raw = (await deps.g8.getSequenceSteps(s.id)).steps ?? [];
+        const steps: StepView[] = raw
+          .map((step) => {
+            const data = (step.step_data ?? {}) as Record<string, unknown>;
+            const instructions = typeof data.instructions === "string" ? data.instructions.trim() : "";
+            const ai = step.input_type === "ON_DEMAND" || Boolean(instructions);
+            return {
+              order: Number(step.step_order ?? 0),
+              day: Math.round(Number(step.time_interval ?? 0) / 86_400),
+              kind: ai ? ("ai" as const) : ("template" as const),
+              ...(typeof data.subject === "string" && data.subject.trim() ? { subject: data.subject.trim() } : {}),
+              text: (ai ? instructions : toPlainText(typeof data.body === "string" ? data.body : "")).slice(0, 6_000),
+            };
+          })
+          .sort((a, b) => a.order - b.order);
+        sequences.push({ id: s.id, name: s.name, steps });
+      } catch (err) {
+        errors.push(`${s.name}: ${describeError(err)}`);
+      }
+    }
+    return { sequences, errors };
+  })();
+  originalCache.set(runId, { at: Date.now(), value });
+  value.catch(() => originalCache.delete(runId));
+  return value;
+}
+
+/** The earlier run's draft that `run` may take over: same org and source, a list and campaign, not already taken over. */
+async function takeoverSource(deps: ServiceDeps, run: Run, key: Category, fromRunId: string) {
+  if (fromRunId === run.id) throw new ApiError(409, "not_possible", "A run can't take over its own draft");
+  const earlier = await loadRun(deps, fromRunId);
+  if (earlier.orgId !== run.orgId || sourceKey(earlier) !== sourceKey(run) || !sourceKey(run))
+    throw new ApiError(409, "not_possible", "That draft belongs to a different campaign; only a draft of the same campaign can be taken over");
+  const group = earlier.groups.find((g) => g.key === key);
+  const draft = group?.draft;
+  if (!group || !draft?.campaignId || !draft.listId) throw new ApiError(409, "not_possible", "The earlier run has no draft of this group to take over");
+  if (draft.supersededBy) throw new ApiError(409, "taken_over", `That draft was already taken over by run ${draft.supersededBy}`);
+  if (activeJob(earlier.id)) throw new ApiError(409, "busy", "A job is working on the earlier run; try again when it finishes");
+  return { run: earlier, group, draft };
 }
 
 async function recordDraftFailure(deps: ServiceDeps, runId: string, key: Category, error: string) {

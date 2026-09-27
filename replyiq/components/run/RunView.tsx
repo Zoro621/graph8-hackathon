@@ -11,6 +11,7 @@ import GroupCard from "./GroupCard";
 import Sheet from "./Sheet";
 import AnswerCardView from "./AnswerCardView";
 import LearningsPanel from "./LearningsPanel";
+import ChannelsPanel from "./ChannelsPanel";
 import StateNotice from "../shell/StateNotice";
 import { Button, Chip, Counter, Eyebrow } from "../ui/primitives";
 import { api, isWorking, useRunView } from "@/lib/client/api";
@@ -238,6 +239,14 @@ export default function RunView({ runId }: { runId: string }) {
           <AgentLog lines={runLog(run)} done={!working} />
         </div>
       </div>
+
+      {run.channels && run.status === "done" && (
+        <ChannelsPanel
+          channels={run.channels}
+          replies={run.counts.prospectReplies}
+          excludedOnCalls={new Set(run.groups.flatMap((g) => g.excluded.filter((x) => x.reason === "said_no_on_call" || x.reason === "booked_on_call").map((x) => x.contactId ?? x.email))).size}
+        />
+      )}
 
       {/* groups */}
       <section className="mt-14">

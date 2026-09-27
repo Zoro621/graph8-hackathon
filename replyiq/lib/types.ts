@@ -86,7 +86,9 @@ export type ExclusionReason =
   | "suppressed" // on graph8's suppression ledger
   | "suppression_unknown" // the suppression check failed: fail closed, never contact
   | "not_found" // no graph8 contact for this reply
-  | "no_followup_category"; // meeting booked / meeting request / needs review
+  | "no_followup_category" // meeting booked / meeting request / needs review
+  | "said_no_on_call" // said not interested / do not call on a dialer call: a hard stop across channels
+  | "booked_on_call"; // booked a meeting on a call: no follow-up campaign needed
 
 export interface Group {
   key: Category;
@@ -116,11 +118,53 @@ export interface CampaignDraft {
   timingNote?: string; // advisory: when to launch (e.g. after OOO return dates)
   /** The follow-up emails, as a graph8 Sequencer DRAFT (no sender attached, never run by ReplyIQ). */
   sequence?: SequenceDraft;
+  /** The revised plan across channels (email and calls), built from every channel's evidence. */
+  strategy?: CampaignStrategy;
+  /** This run took over an earlier run's draft: same list, Studio campaign and follow-up sequence, updated in place. */
+  adoptedFrom?: string;
+  /** A newer run took this draft over; this copy is read-only and points there. */
+  supersededBy?: string;
   warnings: string[];
   error?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+/** A follow-up's revised strategy: why the original didn't convert this group, and what to do on each channel. */
+export interface CampaignStrategy {
+  diagnosis: string[]; // grounded in the run's numbers (every number must appear in `evidence`)
+  angle: string;
+  targeting: { focus: string; avoid: string };
+  plan: { day: number; channel: "email" | "call"; goal: string }[];
+  /** Talk track for the call steps; stated facts are fact-checked like the emails. */
+  callScript?: { opener: string; questions: string[]; objections: { objection: string; answer: string }[]; close: string; voicemail: string };
+  check: EmailCheck; // fact-check of the call script and voicemail
+  evidence: string[]; // the evidence lines the strategist was given
+  createdAt: string;
+}
+
+/** What happened on graph8's other Engage channels for a run's source and contacts. Read-only. */
+export interface ChannelEvidence {
+  loadedAt: string;
+  /** How far each source sequence got (graph8's sequence report). */
+  sequencer: { sequenceId: string; name: string; contacts: number; reached: number; replied: number; bounced: number; unsubscribed: number; meetingsBooked: number; replyRate: number | null }[];
+  calls: {
+    status: ChannelStatus;
+    /** The latest dialer outcome of each contact who replied in this run. */
+    contacts: { contactId: number; disposition: string; summary?: string; at?: string }[];
+    outcomes: Record<string, number>; // disposition -> contacts, among this run's contacts
+    saidNo: number[]; // this run's contacts who said not interested / do not call on a call
+    booked: number[]; // this run's contacts who booked a meeting on a call
+  };
+  meetings: { status: ChannelStatus; total: number; objections: string[] };
+  bookings: { status: ChannelStatus; total: number; fromSource: number; noShows: number };
+  newsletters: { status: ChannelStatus; count: number };
+  nurtures: { status: ChannelStatus; count: number };
+  errors: string[];
+}
+
+/** ok: data found; none: the channel is empty in this org; unavailable: graph8 could not be read. */
+export type ChannelStatus = "ok" | "none" | "unavailable";
 
 /** Result of fact-checking one email: deterministic checks plus a model audit against the allowed facts. */
 export interface EmailCheck {
@@ -216,6 +260,8 @@ export interface Run {
   cards?: { generated: number; failed: number; verifiedProof: number; unverifiedClaims: number };
   /** Suggested company-wide Studio additions (proposed from the Answer Cards; saved only after approval). */
   learnings?: StudioLearnings;
+  /** Evidence from graph8's other Engage channels (sequencer, dialer, meetings, appointments), read during "resolve". */
+  channels?: ChannelEvidence;
   groups: Group[];
   errors: string[];
 }

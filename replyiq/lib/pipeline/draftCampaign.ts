@@ -20,7 +20,9 @@ import type { Llm } from "../llm";
 import type { RunStore } from "../store";
 import { allowsFollowUpCampaign, categoryInfo, isHardStop } from "../taxonomy";
 import type { CampaignDraft, Classified, Group, Run } from "../types";
+import { callStops } from "./channels";
 import { buildFollowupSequence, type SequenceClient } from "./followupSequence";
+import { planStrategy, strategySection } from "./strategy";
 import { findCampaignDoc } from "./sources";
 
 export const LIMITS = { name: 255, category: 100, persona: 200, goal: 255 } as const;
@@ -61,6 +63,10 @@ type DraftClient = SequenceClient &
   | "getCampaignDoc"
   | "updateCampaignDoc"
   | "getCampaignFull"
+  | "searchCallResults"
+  | "listContactsOfList"
+  | "removeContactsFromList"
+  | "updateCampaign"
 >;
 
 /** Referral group: find each named person in the CRM (exact full name, same company). */
@@ -194,16 +200,26 @@ export async function campaignFields(llm: Llm | null, model: string, run: Run, g
 // ---------- doc patching ----------
 
 export const marker = (runId: string, key: string) => `<!-- replyiq:${runId}:${key} -->`;
+/** This group's section written by ANY run: a campaign holds one Answer Card section per group, whichever run wrote it. */
+export const anyRunMarker = (key: string) => new RegExp(`<!-- replyiq:[a-z0-9]{12}:${key.replace(/[^a-z_]/g, "")} -->`);
 
 /**
  * Put ReplyIQ's section into a document: append it if absent; with `refresh`, replace ONLY our own
- * marked section (from our marker to the next ReplyIQ marker or the end), leaving other text alone.
+ * marked section (from its marker to the next ReplyIQ marker or the end), leaving other text alone.
+ * The section is found by this run's marker, else by any run's marker for the same group (an adopted
+ * draft), so a document never holds two sections for one group.
  */
 export function upsertSection(content: string, section: string, mark: string, refresh: boolean): string | null {
-  const at = content.indexOf(mark);
+  let at = content.indexOf(mark);
+  let found = mark;
+  const key = /^<!-- replyiq:[a-z0-9]+:([a-z_]+) -->$/.exec(mark)?.[1];
+  if (at === -1 && key) {
+    const m = anyRunMarker(key).exec(content);
+    if (m) [at, found] = [m.index, m[0]];
+  }
   if (at === -1) return content.trim() ? `${content.trimEnd()}\n\n${section}\n` : `${section}\n`;
   if (!refresh) return null; // already there
-  const after = content.indexOf("<!-- replyiq:", at + mark.length);
+  const after = content.indexOf("<!-- replyiq:", at + found.length);
   const end = after === -1 ? content.length : after;
   return `${content.slice(0, at)}${section}\n${after === -1 ? "" : `\n${content.slice(end)}`}`;
 }
@@ -267,6 +283,13 @@ export interface DraftOptions {
   rebuildSequence?: boolean; // create a new sequence even if one exists
   refreshSequence?: boolean; // re-write the existing sequence's steps in place
   previews?: number; // graph8 drafts of step 1 for up to N contacts (spends credits)
+  /**
+   * This run took over an earlier run's draft (already copied onto the group): re-check the audience and sync
+   * the same list to it, replace the Answer Card section in the same campaign's documents, update the brief,
+   * and rewrite the same follow-up sequence in place. No new list, campaign or sequence; no Studio generation.
+   */
+  adopt?: boolean;
+  skipStrategy?: boolean; // do not (re)build the revised strategy
 }
 
 export class DraftError extends Error {
@@ -306,43 +329,91 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
   if (opts.sequenceOnly && !draft.listId) throw new DraftError("no existing draft with a list; create the draft first");
   await save(draft);
 
+  // 1-2) Audience, re-checked right before anyone is added: hard stops in any thread, a "no" on a call,
+  // and suppression (fail closed). Deduped by contact.
+  const buildAudience = async (): Promise<CampaignDraft["audience"]> => {
+    draft.audienceNotes = [];
+    const { ids: stopIds, emails: stopEmails } = hardStopContacts(run);
+    let candidates: CampaignDraft["audience"];
+    if (group.key === "referral_wrong_person") {
+      const { found, notes } = await referralTargets(deps.g8, group);
+      candidates = found;
+      draft.audienceNotes.push(...notes);
+    } else {
+      candidates = group.eligible.map((e) => ({ ...e }));
+    }
+    const saidNo = new Set(run.channels?.calls.saidNo ?? []);
+    const booked = new Set(run.channels?.calls.booked ?? []);
+    try {
+      const live = await callStops(deps.g8, candidates.map((c) => c.contactId));
+      for (const id of live.saidNo) saidNo.add(id);
+      for (const id of live.booked) booked.add(id);
+    } catch (err) {
+      draft.warnings.push(`call outcomes could not be re-read (${describeError(err)}); the run's own call check still applies`);
+    }
+    const audience: CampaignDraft["audience"] = [];
+    for (const c of candidates) {
+      if (audience.some((a) => a.contactId === c.contactId)) continue;
+      if (stopIds.has(c.contactId) || stopEmails.has(c.email.toLowerCase())) {
+        draft.audienceNotes.push(`${c.email}: said no / unsubscribed in another thread; excluded`);
+        continue;
+      }
+      if (saidNo.has(c.contactId)) {
+        draft.audienceNotes.push(`${c.email}: said not interested / do not call on a call; excluded`);
+        continue;
+      }
+      if (booked.has(c.contactId)) {
+        draft.audienceNotes.push(`${c.email}: booked a meeting on a call; no follow-up needed`);
+        continue;
+      }
+      try {
+        const s = await deps.g8.getSuppression(c.contactId);
+        if (s.is_suppressed || (s.active_channels ?? []).length) {
+          draft.audienceNotes.push(`${c.email}: suppressed; excluded`);
+          continue;
+        }
+      } catch {
+        draft.audienceNotes.push(`${c.email}: suppression check failed; excluded (fail closed)`);
+        continue;
+      }
+      audience.push(c);
+    }
+    const min = deps.minAudience ?? 2;
+    if (audience.length < min) {
+      throw new DraftError(`only ${audience.length} contact(s) can be targeted for "${group.label}" (minimum ${min}). ${draft.audienceNotes.slice(0, 3).join(" | ")}`);
+    }
+    return audience;
+  };
+
+  // An adopted draft's documents carry the earlier run's section: always replace it with this run's.
+  const refreshDocs = Boolean(opts.refreshDocs || opts.adopt);
+
   // Stages 1-5: audience, list, Studio campaign, documents.
   const studioStages = async () => {
-    if (!draft.campaignId) {
-      // 1) Audience.
-      const { ids: stopIds, emails: stopEmails } = hardStopContacts(run);
-      let candidates: CampaignDraft["audience"];
-      if (group.key === "referral_wrong_person") {
-        const { found, notes } = await referralTargets(deps.g8, group);
-        candidates = found;
-        draft.audienceNotes.push(...notes);
-      } else {
-        candidates = group.eligible.map((e) => ({ ...e }));
+    if (draft.campaignId && opts.adopt) {
+      // Taking over an earlier run's draft: this run's audience replaces the list's members, and this run's
+      // evidence replaces the brief. The campaign, its documents and the sequence stay the same objects.
+      const audience = await buildAudience();
+      const members = new Set((await deps.g8.listContactsOfList(draft.listId!)).map((m) => m.id).filter((x): x is number => typeof x === "number"));
+      const wanted = new Set(audience.map((a) => a.contactId));
+      const remove = [...members].filter((id) => !wanted.has(id));
+      const add = [...wanted].filter((id) => !members.has(id));
+      if (remove.length) await deps.g8.removeContactsFromList(draft.listId!, remove);
+      if (add.length) {
+        const added = await deps.g8.addContactsToList(draft.listId!, add);
+        if (added.conflictSkipped) draft.audienceNotes.push("graph8 flagged some contacts (e.g. already in other outreach); they were skipped, not forced in");
       }
-      // 2) Re-check right before adding: hard stops + suppression (fail closed). Dedupe by contact.
-      const audience: CampaignDraft["audience"] = [];
-      for (const c of candidates) {
-        if (audience.some((a) => a.contactId === c.contactId)) continue;
-        if (stopIds.has(c.contactId) || stopEmails.has(c.email.toLowerCase())) {
-          draft.audienceNotes.push(`${c.email}: said no / unsubscribed in another thread; excluded`);
-          continue;
-        }
-        try {
-          const s = await deps.g8.getSuppression(c.contactId);
-          if (s.is_suppressed || (s.active_channels ?? []).length) {
-            draft.audienceNotes.push(`${c.email}: suppressed; excluded`);
-            continue;
-          }
-        } catch {
-          draft.audienceNotes.push(`${c.email}: suppression check failed; excluded (fail closed)`);
-          continue;
-        }
-        audience.push(c);
+      draft.audience = audience;
+      draft.timingNote = timingNote(group);
+      await save(draft);
+      log(`  list ${draft.listId} synced to this run's audience (+${add.length} / -${remove.length})`);
+      try {
+        await deps.g8.updateCampaign(draft.campaignId, { brief: buildBrief(run, group, audience.length) });
+      } catch (err) {
+        draft.warnings.push(`the campaign brief could not be updated (${describeError(err)})`);
       }
-      const min = deps.minAudience ?? 2;
-      if (audience.length < min) {
-        throw new DraftError(`only ${audience.length} contact(s) can be targeted for "${group.label}" (minimum ${min}). ${draft.audienceNotes.slice(0, 3).join(" | ")}`);
-      }
+    } else if (!draft.campaignId) {
+      const audience = await buildAudience();
       draft.audience = audience;
       draft.timingNote = timingNote(group);
       await save(draft);
@@ -427,14 +498,14 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
         continue;
       }
       const label = meta.file_type ?? kind;
-      if (draft.docsPatched.includes(label) && !opts.refreshDocs) continue;
+      if (draft.docsPatched.includes(label) && !refreshDocs) continue;
       if (kind === "brief" && !isFailed(meta)) continue; // a generated brief is Studio's; only fill a failed one
       if (!isTerminal(meta)) {
         draft.docsPending.push(label); // generation would overwrite our text: patch later
         continue;
       }
       const content = docText(await deps.g8.getCampaignDoc(draft.campaignId!, meta.id));
-      const next = upsertSection(content, render(), marker(run.id, group.key), Boolean(opts.refreshDocs));
+      const next = upsertSection(content, render(), marker(run.id, group.key), refreshDocs);
       if (next !== null && next !== content) {
         await deps.g8.updateCampaignDoc(draft.campaignId!, meta.id, next);
         if (!content.trim()) draft.warnings.push(`${docLabel(label)}: Studio left it empty; ReplyIQ wrote its grounded section into it`);
@@ -456,13 +527,25 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
           run,
           group,
           draft,
-          { previews: opts.previews, rebuild: opts.rebuildSequence, refresh: opts.refreshSequence },
+          { previews: opts.previews, rebuild: opts.rebuildSequence, refresh: opts.refreshSequence || opts.adopt },
         );
         if (draft.sequence.status === "failed") draft.warnings.push(`follow-up sequence not created: ${draft.sequence.error}`);
       } catch (err) {
         draft.warnings.push(`follow-up sequence not created: ${describeError(err)}`);
       }
       await save(draft);
+    }
+    // 7) The revised strategy across channels, from every channel's evidence. Not critical: failures are warnings.
+    // Previews and late-doc patches leave it alone; a new draft, a rewrite and a takeover (re)build it.
+    const wantsStrategy = !opts.patchOnly && (!opts.sequenceOnly || opts.refreshSequence) && !opts.skipStrategy;
+    if (wantsStrategy && deps.llm && draft.sequence?.status === "ready") {
+      try {
+        draft.strategy = await planStrategy({ llm: deps.llm, model: deps.model, auditModel: deps.auditModel }, run, group, draft.sequence.facts, draft.sequence.doNotClaim, new Date(now()));
+        await save(draft);
+        await deps.g8.updateCampaign(draft.campaignId!, { brief: `${buildBrief(run, group, draft.audience.length)}\n\n${strategySection(draft.strategy)}` });
+      } catch (err) {
+        draft.warnings.push(`revised strategy not added (${describeError(err)})`);
+      }
     }
     draft.status = "ready";
     return await save(draft);

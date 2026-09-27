@@ -11,6 +11,7 @@ import path from "node:path";
 import { envStatus, getEnv } from "../lib/env";
 import { createG8Client, describeError, docText, g8, WriteNotAllowedError } from "../lib/g8";
 import { llm } from "../lib/llm";
+import { callStops } from "../lib/pipeline/channels";
 import { draftCampaign, marker, referralTargets } from "../lib/pipeline/draftCampaign";
 import { verifyRecordedSequence } from "../lib/pipeline/followupSequence";
 import { blockStart } from "../lib/pipeline/studioLearnings";
@@ -332,6 +333,13 @@ async function main() {
       must(bad.length === 0, `suppressed but eligible: ${bad.join(", ")}`);
       return { detail: `${ids.length} contact(s) checked, none suppressed` };
     });
+    await check(area, "no one who said no on a call is eligible (re-read live)", async () => {
+      const ids = [...new Set(run.groups.flatMap((g) => g.eligible.map((e) => e.contactId)))];
+      const stops = await callStops(client, ids);
+      must(stops.saidNo.size === 0 && stops.booked.size === 0, `eligible but said no / booked on a call: ${[...stops.saidNo, ...stops.booked].join(", ")}`);
+      const calls = run.channels?.calls;
+      return { detail: `${ids.length} eligible contact(s) re-checked; dialer ${calls?.status ?? "not read"}${calls?.status === "ok" ? `, ${calls.contacts.length} replying contact(s) called, ${calls.saidNo.length} said no, ${calls.booked.length} booked` : ""}` };
+    });
     await check(area, "Answer Cards grounded (re-verified against fresh documents)", async () => {
       if (run.steps.cards === "skipped") return { status: "info", detail: "no objection/interest groups, so no cards (expected)" };
       must(run.steps.cards === "done", `cards step ${run.steps.cards}`);
@@ -422,7 +430,8 @@ async function main() {
   // ----- F. Every draft recorded in local runs still exists in graph8 -----
   await check("drafts", "all recorded drafts still intact in graph8", async () => {
     const runs = (await Promise.all((await store.list()).map((r) => store.load(r.id)))).filter((r): r is Run => Boolean(r));
-    const ready = runs.flatMap((r) => r.groups.filter((g) => g.draft?.status === "ready" && g.draft.campaignId).map((g) => ({ r, g })));
+    // A draft a newer run took over is verified through that run (its current owner), not twice.
+    const ready = runs.flatMap((r) => r.groups.filter((g) => g.draft?.status === "ready" && g.draft.campaignId && !g.draft.supersededBy).map((g) => ({ r, g })));
     for (const { r, g } of ready) await verifyDraft(r.id, g.key);
     return { status: ready.length ? "pass" : "info", detail: `${ready.length} draft(s) verified: ${ready.map(({ g }) => `${g.label} → ${g.draft!.campaignId!.slice(0, 8)}`).join(", ") || "none"}` };
   });

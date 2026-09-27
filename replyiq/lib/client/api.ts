@@ -2,7 +2,7 @@
 // Typed calls to the app's API routes, plus a tiny shared cache: every component reading the same URL
 // shares one request and one result, and polling stops as soon as nothing is running.
 import { useEffect, useSyncExternalStore } from "react";
-import type { ApiErrorBody, LearningsView, RunSummary, RunView, SourceSummary, StatusView } from "../api-types";
+import type { ApiErrorBody, LearningsView, OriginalView, RunSummary, RunView, SourceSummary, StatusView } from "../api-types";
 import type { Category } from "../types";
 
 export class ApiError extends Error {
@@ -39,11 +39,12 @@ export const keys = {
   sources: "/api/sources",
   runs: "/api/runs",
   run: (id: string) => `/api/runs/${encodeURIComponent(id)}`,
+  original: (id: string) => `/api/runs/${encodeURIComponent(id)}/original`,
 };
 
 export const api = {
   startRun: (body: { sequenceId: string } | { campaignId: string }) => post<{ runId: string }>(keys.runs, body),
-  draft: (runId: string, group: Category, body: { action: "create" | "patch" | "previews"; previews?: number }) =>
+  draft: (runId: string, group: Category, body: { action: "create" | "patch" | "previews" | "rewrite" | "adopt"; previews?: number; fromRunId?: string }) =>
     post<{ runId: string; group: Category }>(`${keys.run(runId)}/groups/${group}/draft`, body),
   learnings: (runId: string, action: "propose" | "apply" | "remove") => post<LearningsView>(`${keys.run(runId)}/learnings`, { action }),
   refreshSources: () => request<SourceSummary[]>(`${keys.sources}?refresh=1`),
@@ -134,6 +135,9 @@ export const useRunSummaries = (enabled = true) =>
 
 /** One run; polls every 1.5 s while the pipeline, a draft or learnings job is working on it. */
 export const useRunView = (id: string | null) => useResource<RunView>(id ? keys.run(id) : null, (d) => (isWorking(d) ? 1500 : 0));
+
+/** The run's original sequence (V1), read live from graph8 once per view. */
+export const useOriginal = (id: string | null) => useResource<OriginalView>(id ? keys.original(id) : null);
 
 export const isWorking = (run: RunView | undefined) =>
   Boolean(run && !run.interrupted && (run.status === "running" || run.job || run.groups.some((g) => g.draft?.status === "drafting")));
