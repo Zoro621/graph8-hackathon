@@ -97,6 +97,8 @@ describe("startRun", () => {
     const done = await getRunView(d, runId);
     expect(done.status).toBe("done");
     expect(done.job).toBeNull();
+    expect(Date.parse(done.finishedAt!)).toBeGreaterThanOrEqual(Date.parse(done.createdAt)); // drafts later move updatedAt, not this
+    expect(done.otherOrg).toBe(false);
     expect(done.source.name).toBe("[DEMO] Seq A");
     expect(done.groups.map((g) => g.key).sort()).toEqual(["pricing_request", "unsubscribe"]);
     // The view never ships full conversations.
@@ -179,6 +181,18 @@ describe("learnings and summaries", () => {
     expect(toApiError(await runLearnings(d, runId, { action: "nope" }).catch((e) => e)).status).toBe(400);
   });
 
+  it("won't propose over learnings that are saved in Studio (the record would stop matching Studio)", async () => {
+    const d = deps();
+    const { runId } = await startRun(d, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    const run = (await store.load(runId))!;
+    await store.save({ ...run, learnings: { status: "applied", proposedAt: run.createdAt, appliedAt: run.createdAt, proposals: [] } });
+    const err = await runLearnings(d, runId, { action: "propose" }).catch((e) => e);
+    expect(err).toMatchObject({ status: 409, code: "not_possible" });
+    expect(err.message).toMatch(/take them out first/);
+    expect((await store.load(runId))!.learnings!.status).toBe("applied");
+  });
+
   it("summarises recent runs", async () => {
     const d = deps();
     await startRun(d, { sequenceId: "seqA", writeTags: false });
@@ -186,6 +200,42 @@ describe("learnings and summaries", () => {
     const [s] = await listRunSummaries(d);
     expect(s).toMatchObject({ status: "done", name: "[DEMO] Seq A", replies: 3, job: null });
     expect(s.draftable).toBe(1); // pricing (2 eligible); unsubscribe never
+  });
+});
+
+describe("runs saved with a key for another graph8 org", () => {
+  async function runIn(d: ServiceDeps, orgId: string) {
+    const { runId } = await startRun(d, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    await store.save({ ...(await store.load(runId))!, orgId });
+    return runId;
+  }
+
+  it("can be read, but never drafted or used to change Studio, and leave the recent list", async () => {
+    const d = deps();
+    const runId = await runIn(d, "org_other");
+    const view = await getRunView(d, runId);
+    expect(view.otherOrg).toBe(true);
+    expect(view.groups.find((g) => g.key === "pricing_request")!.draftable).toMatchObject({ ok: false, reason: expect.stringMatching(/different graph8 org/) });
+    for (const action of ["create", "patch", "previews"]) expect((await startDraft(d, runId, "pricing_request", { action }).catch((e) => e)).code).toBe("other_org");
+    for (const action of ["propose", "apply", "remove"]) expect((await runLearnings(d, runId, { action }).catch((e) => e)).code).toBe("other_org");
+    expect(tasks).toHaveLength(0);
+    expect(await listRunSummaries(d)).toEqual([]);
+  });
+
+  it("hides nothing when graph8 can't say which org the key opens", async () => {
+    const d = deps();
+    await runIn(d, "org_other");
+    await runIn(d, "org_test");
+    const offline = deps(
+      fakeOrg({
+        writePolicy: async () => {
+          throw new Error("graph8 unreachable");
+        },
+      }),
+    );
+    expect(await listRunSummaries(offline)).toHaveLength(2);
+    expect(await listRunSummaries(d)).toHaveLength(1);
   });
 });
 

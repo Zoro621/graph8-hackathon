@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import type { ApiErrorBody } from "../api-types";
-import { toApiError } from "./service";
+import { ApiError, toApiError } from "./service";
 import { assertSameOrigin } from "./origin";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -22,6 +22,6 @@ export async function body(req: Request): Promise<unknown> {
   try {
     return JSON.parse(text);
   } catch {
-    return Symbol("invalid json"); // fails schema validation with a 400
+    throw new ApiError(400, "invalid_json", "The request body is not valid JSON");
   }
 }

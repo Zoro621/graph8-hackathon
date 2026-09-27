@@ -1,4 +1,4 @@
-// Response shapes of the app's own API routes (app/api/*). Types only: safe to import from client code.
+// Response shapes of the app's own API routes (app/api/*). Safe to import from client code.
 import type { Category, Classified, Group, Run, SourceSummary, StudioLearnings } from "./types";
 import type { WritePolicy } from "./g8";
 
@@ -17,6 +17,9 @@ export interface Draftability {
 }
 
 export type GroupView = Omit<Group, "replies"> & { replies: ReplyView[]; draftable: Draftability };
+
+/** Why a run saved with another graph8 key is read-only (shown by the server and the UI). */
+export const OTHER_ORG_REASON = "This run was made in a different graph8 org than the one your API key opens";
 
 /** Learnings without the local document backups (those never leave the server). */
 export type LearningsView = Omit<StudioLearnings, "proposals"> & {
@@ -37,6 +40,8 @@ export type RunView = Omit<Run, "groups" | "learnings"> & {
   job: JobView | null;
   /** The run (or a draft) says it is still working, but no job is running: the server restarted mid-way. */
   interrupted: boolean;
+  /** Saved with a key for another graph8 org: readable, but never drafted or used to change Studio. */
+  otherOrg: boolean;
 };
 
 export interface RunSummary {
