@@ -93,7 +93,7 @@ function subscribe(key: string) {
 
 /**
  * Reads a GET endpoint. `poll` returns the refresh interval for the current data (ms), or 0 to stop.
- * Polling pauses while the tab is hidden.
+ * Polling pauses while the tab is hidden and catches up the moment it is shown again.
  */
 export function useResource<T>(key: string | null, poll?: (data: T | undefined) => number): Resource<T> & { refresh: () => Promise<void> } {
   const snap = useSyncExternalStore(
@@ -107,10 +107,16 @@ export function useResource<T>(key: string | null, poll?: (data: T | undefined) 
   const every = key && poll ? poll(snap.data) : 0;
   useEffect(() => {
     if (!key || !every) return;
-    const id = setInterval(() => {
+    const tick = () => {
       if (document.visibilityState === "visible") void revalidate(key);
-    }, every);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(tick, every);
+    // Coming back to the tab refreshes at once instead of showing what was true when it was hidden.
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [key, every]);
   return { ...snap, refresh: () => (key ? revalidate(key) : Promise.resolve()) };
 }
