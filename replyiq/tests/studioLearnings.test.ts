@@ -116,7 +116,7 @@ describe("blocks", () => {
     expect(m.match(/send pricing details/gi)).toHaveLength(1);
     expect(m).toContain("**How to answer:** Answer with the published price.");
     expect(m).toContain('- Team plan price: "The Team Plan is $99/month for unlimited users." (Pricing Matrix)');
-    expect(m).toContain("**Don't claim (no proof yet):** No per-action credit table.");
+    expect(m).toContain("**No proof yet for:** No per-action credit table. (do not fill this gap with a guess)");
     expect(proofBlock(run, run.groups, "2026-09-27")).toContain('- **Pricing request** (2 replies, e.g. "Send pricing details"): No per-action credit table.');
     const noGap = pricing();
     noGap.card!.proofGap = null;
