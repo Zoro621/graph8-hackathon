@@ -120,9 +120,11 @@ export async function proposeLearnings(deps: LearningsDeps, runId: string): Prom
     ["proof", proofBlock(run, groups, date)],
   ] as const) {
     if (!body) continue;
-    const doc = findTargetDoc(docs, kind);
-    if (!doc) continue;
-    proposals.push({ docId: doc.id, docName: doc.displayName, kind, key, section: body, action: upsertBlock(doc.content, key, body).action, ...(doc.version != null ? { baseVersion: doc.version } : {}) });
+    const listed = findTargetDoc(docs, kind);
+    if (!listed) continue;
+    // The list endpoint has no save counter (current_version), so read the document itself.
+    const doc = await deps.g8.getGlobalDoc(listed.id);
+    proposals.push({ docId: listed.id, docName: listed.displayName, kind, key, section: body, action: upsertBlock(doc.content, key, body).action, ...(doc.version != null ? { baseVersion: doc.version } : {}) });
   }
   if (!proposals.length) throw new LearningsError("no Messaging House or Proof Catalog document found in Studio Global");
   run.learnings = { status: "proposed", proposedAt: now.toISOString(), proposals };

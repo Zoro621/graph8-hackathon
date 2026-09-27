@@ -1,6 +1,7 @@
 "use client";
 import { AnimatePresence, m } from "motion/react";
 import { BookMarked, CheckCircle2, Loader2, Undo2 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import type { RunView } from "@/lib/api-types";
 import { api, keys, revalidate } from "@/lib/client/api";
@@ -36,8 +37,8 @@ export default function LearningsPanel({ run }: { run: RunView }) {
           Teach Studio <span className="font-serif font-normal italic text-iris">what the field said</span>
         </h2>
         {l && (
-          <Chip color={applied ? "#4fe3d1" : l.status === "failed" ? "#ff5d7a" : "#9b8cff"}>
-            {applied ? "saved in Studio" : l.status === "removed" ? "removed" : l.status === "failed" ? "failed" : "proposed · not saved"}
+          <Chip color={applied ? "#4fe3d1" : l.status === "failed" ? "#ff5d7a" : l.status === "replaced" ? "#ffb547" : "#9b8cff"}>
+            {applied ? "saved in Studio" : l.status === "removed" ? "removed" : l.status === "failed" ? "failed" : l.status === "replaced" ? "replaced by a newer run" : "proposed · not saved"}
           </Chip>
         )}
       </div>
@@ -47,9 +48,30 @@ export default function LearningsPanel({ run }: { run: RunView }) {
       </p>
 
       <div className="surface mt-6 rounded-3xl p-5 sm:p-7">
-        {!l || l.status === "removed" ? (
+        {!l || l.status === "removed" || l.status === "replaced" ? (
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <p className="text-sm text-muted">{l?.status === "removed" ? "The block was taken out of Studio. You can propose it again." : "Preview the exact text first. This only reads Studio."}</p>
+            <p className="text-sm text-muted">
+              {l?.status === "replaced" ? (
+                <>
+                  A newer run saved its own block for this campaign in Studio
+                  {l.replacedBy && (
+                    <>
+                      {" "}
+                      (
+                      <Link href={`/runs/${l.replacedBy}`} className="text-iris hover:underline">
+                        open that run
+                      </Link>
+                      )
+                    </>
+                  )}
+                  . You can propose this run&apos;s text again.
+                </>
+              ) : l?.status === "removed" ? (
+                "The block was taken out of Studio. You can propose it again."
+              ) : (
+                "Preview the exact text first. This only reads Studio."
+              )}
+            </p>
             <Button variant="iris" onClick={() => act("propose")} disabled={!!busy || !!run.job}>
               {busy === "propose" ? <Loader2 className="size-4 animate-spin" /> : <BookMarked className="size-4" />} Preview the additions
             </Button>
@@ -61,8 +83,9 @@ export default function LearningsPanel({ run }: { run: RunView }) {
                 <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 text-sm">
                   <span className="font-medium text-text">{p.docName}</span>
                   <span className="font-mono text-[11px] text-dim">
-                    {p.action === "append" ? "adds a new block" : p.action === "replace" ? "replaces ReplyIQ's block" : "no change"}
-                    {p.savedVersion != null ? ` · version ${p.savedVersion}` : p.baseVersion != null ? ` · now version ${p.baseVersion}` : ""}
+                    {applied
+                      ? `${p.action === "append" ? "added a new block" : p.action === "replace" ? "replaced ReplyIQ's block" : "already up to date"}${p.savedVersion != null ? ` · saved as version ${p.savedVersion}` : ""}`
+                      : `${p.action === "append" ? "adds a new block" : p.action === "replace" ? "replaces ReplyIQ's block" : "no change"}${p.baseVersion != null ? ` · Studio has version ${p.baseVersion}` : ""}`}
                   </span>
                 </div>
                 <pre className="thin-scroll max-h-72 overflow-auto whitespace-pre-wrap p-4 font-sans text-[13px] leading-relaxed text-muted">{p.section}</pre>
@@ -75,7 +98,7 @@ export default function LearningsPanel({ run }: { run: RunView }) {
                   <p className="flex items-center gap-2 text-sm text-aqua">
                     <CheckCircle2 className="size-4" /> Saved to Studio and read back to verify.
                   </p>
-                  <Button variant="ghost" onClick={() => act("remove")} disabled={!!busy}>
+                  <Button variant="ghost" onClick={() => act("remove")} disabled={!!busy || !!run.job}>
                     {busy === "remove" ? <Loader2 className="size-4 animate-spin" /> : <Undo2 className="size-4" />} Take it out again
                   </Button>
                 </m.div>

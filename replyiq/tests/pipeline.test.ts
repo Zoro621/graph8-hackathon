@@ -204,6 +204,30 @@ describe("runPipeline (integration: sources + fetch + classify + themes + tag + 
     expect(snapshots.at(-1)?.status).toBe("done");
   });
 
+  it("Answer Cards never use ReplyIQ's own blocks in Studio documents as proof", async () => {
+    const own = "Heard in the field: teams switch within ninety days once pricing is clear to them.";
+    const messagingHouse = `Our pricing is published and simple for every team size.\n\n<!-- replyiq:learnings:c1 -->\n## Heard in the field\n${own}\n<!-- /replyiq:learnings:c1 -->\n`;
+    const { llm, cardRequests } = fakeLlm((items) => items.map((i) => label(i.id, "pricing_request", i.latest_prospect_reply)), {
+      card: () => ({
+        summary: "s",
+        quotes: [],
+        proof: [
+          { claim: "switch fast", doc_id: "g1", excerpt: own }, // only in ReplyIQ's block: must be dropped
+          { claim: "pricing is public", doc_id: "g1", excerpt: "Our pricing is published and simple for every team size." },
+        ],
+        proof_gap: "gap",
+        how_to_answer: "h",
+        email_angle: "e",
+        theme_notes: [],
+      }),
+    });
+    const g8 = fakeOrg([thread("t1", "What is the pricing?")], { listGlobalDocs: async () => [{ id: "g1", displayName: "Messaging House", content: messagingHouse }] });
+    const run = await runPipeline({ g8, llm, store: createFileStore(dir), classifyModel: "m" }, { selector: { campaignId: "c1" } });
+    const card = run.groups.find((g) => g.key === "pricing_request")!.card!;
+    expect(card.proofWeHave.map((p) => p.claim)).toEqual(["pricing is public"]);
+    expect(cardRequests.map((r) => r.user).join()).not.toContain("ninety days"); // the model never even sees it
+  });
+
   it("records a graph8 failure on the step and never throws", async () => {
     const { llm, requests } = fakeLlm(() => []);
     const org = fakeOrg([], { listThreads: async () => Promise.reject(new Error("inbox 503")) });

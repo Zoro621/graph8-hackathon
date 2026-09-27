@@ -4,6 +4,7 @@ import type { G8Client } from "../g8";
 import { describeError, WriteNotAllowedError } from "../g8";
 import type { Llm } from "../llm";
 import type { RunStore } from "../store";
+import { withoutOwnSections } from "../text";
 import type { Run, StepName } from "../types";
 import { classifyReplies } from "./classify";
 import { groupReplies } from "./group";
@@ -181,8 +182,10 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
           .filter((d): d is NonNullable<typeof d> => Boolean(d))
           .map((d) => ({ id: d.id, name: `Campaign: ${d.name}`, kind: "campaign" as const, content: d.content }));
         try {
-          const global = await deps.g8.listGlobalDocs();
-          docs.push(...global.filter((d) => d.content).map((d) => ({ id: d.id, name: d.displayName, kind: "global" as const, content: d.content })));
+          for (const d of await deps.g8.listGlobalDocs()) {
+            const content = withoutOwnSections(d.content); // proof comes from the company's text, never ReplyIQ's own blocks
+            if (content) docs.push({ id: d.id, name: d.displayName, kind: "global", content });
+          }
         } catch (err) {
           run.errors.push(`cards: Studio documents unavailable (${describeError(err)}); cards use campaign documents only`);
         }
@@ -211,6 +214,7 @@ export async function runPipeline(deps: PipelineDeps, opts: PipelineOptions): Pr
   } catch {
     run.status = "failed";
   }
+  run.finishedAt = now().toISOString();
   await persist();
   return run;
 }

@@ -12,7 +12,7 @@ import { emptyRun, runPipeline } from "../pipeline/runPipeline";
 import { discoverSources } from "../pipeline/sources";
 import { DraftError, draftCampaign, nameKey, parsePersonNames } from "../pipeline/draftCampaign";
 import { LearningsError, applyLearnings, proposeLearnings, removeLearnings } from "../pipeline/studioLearnings";
-import type { Draftability, GroupView, LearningsView, RunSummary, RunView, StatusView } from "../api-types";
+import { OTHER_ORG_REASON, type Draftability, type GroupView, type LearningsView, type RunSummary, type RunView, type StatusView } from "../api-types";
 import { activeJob, claim, release } from "./jobs";
 
 export interface ServiceDeps {
@@ -86,6 +86,22 @@ export function clearSourcesCache() {
 
 // ---------- runs ----------
 
+/** The org the API key opens (the client caches it after the first call); undefined when graph8 can't be reached. */
+async function keyOrg(deps: ServiceDeps): Promise<string | undefined> {
+  try {
+    return (await deps.g8.writePolicy()).orgId;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A run saved with another key belongs to another org: its contacts, replies and campaigns don't exist in this one. */
+export const fromOtherOrg = (run: Pick<Run, "orgId">, org: string | undefined) => Boolean(org && run.orgId && run.orgId !== org);
+
+async function assertSameOrg(deps: ServiceDeps, run: Run) {
+  if (fromOtherOrg(run, await keyOrg(deps))) throw new ApiError(409, "other_org", `${OTHER_ORG_REASON}. It can be read, but not drafted or used to change Studio.`);
+}
+
 async function loadRun(deps: ServiceDeps, id: string): Promise<Run> {
   if (!/^[a-z0-9]{12}$/.test(id)) throw new ApiError(404, "run_not_found", `Run ${id} not found`);
   const run = await deps.store.load(id);
@@ -122,11 +138,25 @@ export async function startRun(deps: ServiceDeps, body: unknown): Promise<{ runI
         },
         { selector, runId, writeTags: input.writeTags },
       );
+    } catch (err) {
+      // runPipeline records step failures itself; this only catches a crash (e.g. the run file can't be saved).
+      await recordRunFailure(deps, runId, describeError(err)).catch(() => {});
     } finally {
       release(runId);
     }
   });
   return { runId };
+}
+
+async function recordRunFailure(deps: ServiceDeps, runId: string, error: string) {
+  const run = await deps.store.load(runId);
+  if (!run || run.status !== "running") return;
+  const now = new Date().toISOString();
+  run.status = "failed";
+  run.errors.push(`run stopped: ${error}`);
+  run.finishedAt = now;
+  run.updatedAt = now;
+  await deps.store.save(run);
 }
 
 const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefined =>
@@ -145,12 +175,13 @@ const stripLearnings = (l: StudioLearnings | undefined): LearningsView | undefin
  * The draft looks each name up within that reply's company, so a name counts once per company. This is an
  * upper bound: the draft still enforces the minimum on the contacts it actually finds.
  */
-export function draftability(run: Pick<Run, "steps">, g: Group, min: number): Draftability {
+export function draftability(run: Pick<Run, "steps" | "orgId">, g: Group, min: number, org?: string): Draftability {
   const referral = g.key === "referral_wrong_person";
   const targets = referral
     ? new Set(g.replies.flatMap((r) => parsePersonNames(r.referredName).map((n) => `${nameKey(n)}|${nameKey(r.company ?? "")}`))).size
     : g.eligible.length;
   if (!allowsFollowUpCampaign(g.key)) return { ok: false, targets, reason: `${g.label} never gets a follow-up campaign` };
+  if (fromOtherOrg(run, org)) return { ok: false, targets, reason: OTHER_ORG_REASON };
   if (run.steps.resolve !== "done") return { ok: false, targets, reason: "The audience has not been checked yet" };
   if (targets < min)
     return { ok: false, targets, reason: referral ? `Needs at least ${min} named people to look up; the replies name ${targets}` : `Needs at least ${min} eligible contacts; this group has ${targets}` };
@@ -158,27 +189,32 @@ export function draftability(run: Pick<Run, "steps">, g: Group, min: number): Dr
 }
 
 /** The run as the UI needs it: no full conversations, no document backups, plus live job state. */
-export function toRunView(run: Run, minGroup = 2): RunView {
+export function toRunView(run: Run, minGroup = 2, org?: string): RunView {
   const job = activeJob(run.id);
   const groups: GroupView[] = run.groups.map((g) => ({
     ...g,
     replies: g.replies.map(({ conversation, ...r }) => ({ ...r, messages: conversation.length })),
-    draftable: draftability(run, g, minGroup),
+    draftable: draftability(run, g, minGroup, org),
   }));
   const working = run.status === "running" || run.groups.some((g) => g.draft?.status === "drafting");
-  return { ...run, groups, learnings: stripLearnings(run.learnings), job, interrupted: working && !job };
+  return { ...run, groups, learnings: stripLearnings(run.learnings), job, interrupted: working && !job, otherOrg: fromOtherOrg(run, org) };
 }
 
 export async function getRunView(deps: ServiceDeps, id: string): Promise<RunView> {
-  return toRunView(await loadRun(deps, id), deps.env.MIN_GROUP_SIZE);
+  const run = await loadRun(deps, id);
+  return toRunView(run, deps.env.MIN_GROUP_SIZE, await keyOrg(deps));
 }
 
+/** Recent runs of the org the key opens. Runs saved with another key stay reachable by URL, read-only. */
 export async function listRunSummaries(deps: ServiceDeps, limit = 12): Promise<RunSummary[]> {
-  const list = (await deps.store.list()).slice(0, limit);
-  const runs = await Promise.all(list.map((r) => deps.store.load(r.id).catch(() => null)));
-  return runs
-    .filter((r): r is Run => r !== null)
-    .map((r) => ({
+  const org = await keyOrg(deps);
+  const runs: Run[] = [];
+  for (const r of await deps.store.list()) {
+    const run = await deps.store.load(r.id).catch(() => null);
+    if (run && !fromOtherOrg(run, org)) runs.push(run);
+    if (runs.length === limit) break;
+  }
+  return runs.map((r) => ({
       id: r.id,
       createdAt: r.createdAt,
       status: r.status,
@@ -208,7 +244,9 @@ export async function startDraft(deps: ServiceDeps, runId: string, key: string, 
   const run = await loadRun(deps, runId);
   const group = run.groups.find((g) => g.key === groupKey);
   if (!group) throw new ApiError(404, "group_not_found", `This run has no "${key}" group`);
-  if (!allowsFollowUpCampaign(groupKey)) throw new ApiError(409, "not_possible", `"${group.label}" never gets a follow-up campaign (${categoryInfo(groupKey).followUp})`);
+  await assertSameOrg(deps, run);
+  if (!allowsFollowUpCampaign(groupKey))
+    throw new ApiError(409, "not_possible", categoryInfo(groupKey).followUp === "rep" ? `"${group.label}" goes to a rep, not a follow-up campaign` : `"${group.label}" is never re-contacted, so it gets no follow-up campaign`);
   if (run.steps.resolve !== "done") throw new ApiError(409, "not_possible", "The run's audience was not resolved; run the analysis again first");
   if (input.action !== "create" && !group.draft?.campaignId) throw new ApiError(409, "not_possible", "Create the draft first");
   // Same preflight the UI shows, so a direct request can't start a draft that is bound to fail.
@@ -263,17 +301,37 @@ async function recordDraftFailure(deps: ServiceDeps, runId: string, key: Categor
 
 // ---------- company-wide learnings ----------
 
+/** Saving a run's block replaced any older run's block for the same campaign: their records now say so. */
+async function markReplaced(deps: ServiceDeps, newer: Run, keys: string[]) {
+  for (const { id } of await deps.store.list()) {
+    if (id === newer.id || activeJob(id)) continue; // a run with a job is rewritten by that job
+    const run = await deps.store.load(id).catch(() => null);
+    const l = run?.learnings;
+    if (!run || run.orgId !== newer.orgId || l?.status !== "applied" || !l.proposals.some((p) => keys.includes(p.key))) continue;
+    run.learnings = { ...l, status: "replaced", replacedBy: newer.id };
+    run.updatedAt = new Date().toISOString();
+    await deps.store.save(run);
+  }
+}
+
 export const LearningsBody = z.object({ action: z.enum(["propose", "apply", "remove"]) });
 
 /** Propose is read-only; apply and remove write to Studio. All are short, so they run inside the request. */
 export async function runLearnings(deps: ServiceDeps, runId: string, body: unknown): Promise<LearningsView> {
   const { action } = LearningsBody.parse(body ?? {});
-  await loadRun(deps, runId);
+  const run = await loadRun(deps, runId);
+  await assertSameOrg(deps, run);
+  // Keeps the run's record true to Studio: a new proposal would overwrite the record of a block that is saved there.
+  if (action === "propose" && run.learnings?.status === "applied") throw new ApiError(409, "not_possible", "These learnings are saved in Studio; take them out first to propose again");
+  // Studio holds one ReplyIQ block per campaign: once a newer run replaced it, this run's text is no longer there.
+  if (action !== "propose" && run.learnings?.status === "replaced")
+    throw new ApiError(409, "not_possible", "A newer run saved its own block for this campaign in Studio; take it out from that run, or propose this run's text again");
   if (action !== "propose") await deps.g8.assertWriteAllowed();
   if (!claim(runId, "learnings")) throw new ApiError(409, "busy", "Another job is already working on this run");
   try {
     const ldeps = { g8: deps.g8, store: deps.store, log: deps.log };
     const result = action === "propose" ? await proposeLearnings(ldeps, runId) : action === "apply" ? await applyLearnings(ldeps, runId) : await removeLearnings(ldeps, runId);
+    if (action === "apply" && result.status === "applied") await markReplaced(deps, run, result.proposals.map((p) => p.key));
     return stripLearnings(result)!;
   } finally {
     release(runId);

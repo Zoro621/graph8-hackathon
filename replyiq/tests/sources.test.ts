@@ -35,7 +35,7 @@ function fakeOrg(): G8Client {
       linked_sequences: [{ sequence_id: "seqA" }],
       documents: [
         { id: "d1", file_type: "messaging_objections", content: "angles + objections" },
-        { id: "d2", display_name: "Reply Templates", content: "templates" },
+        { id: "d2", display_name: "Reply Templates", content: "templates\n\n<!-- replyiq:run1:pricing_request -->\nReplyIQ's own section" },
         { id: "d3", file_type: "emails", content: "" }, // empty: must be ignored
       ],
     },
@@ -90,6 +90,7 @@ describe("resolveSource", () => {
     expect(ctx.audienceListId).toBe(100);
     expect(ctx.mailboxes).toEqual(["a@example.com"]);
     expect(Object.keys(ctx.docs).sort()).toEqual(["objections", "replyTemplates"]); // empty emails doc ignored
+    expect(ctx.docs.replyTemplates?.content).toBe("templates"); // ReplyIQ's own section is never grounding
     expect(ctx.warnings).toEqual([]);
   });
 

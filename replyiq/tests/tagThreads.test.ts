@@ -110,6 +110,15 @@ describe("tagThreads", () => {
     expect(res.warnings.join()).toMatch(/still carries old tag/);
   });
 
+  it("warnings name the person, not the thread id", async () => {
+    const { client } = fakeClient([{ id: "t-ooo", name: "ReplyIQ · Out of office" }], { failUntag: true, failTag: ["thread-b-0001"] });
+    const named = { ...cl("thread-a-0001", "hard_no", [{ id: "t-ooo", name: "ReplyIQ · Out of office" }]), contactName: "Dana Reyes", company: "Acme" };
+    const res = await tagThreads(client, [grp("hard_no", [named, cl("thread-b-0001", "hard_no")])]);
+    expect(res.warnings).toContain('Dana Reyes (Acme): thread still carries old tag "ReplyIQ · Out of office" (graph8 would not remove it)');
+    expect(res.warnings).toContain("thread-b-0001@example.com: could not tag the thread (graph8 500)");
+    expect(res.warnings.join()).not.toMatch(/thread-a-0001/);
+  });
+
   it("a failing thread is recorded and never stops the others", async () => {
     const { client, log } = fakeClient([], { failTag: ["b"] });
     const res = await tagThreads(client, [grp("out_of_office", [cl("a", "out_of_office"), cl("b", "out_of_office"), cl("c", "out_of_office")])]);

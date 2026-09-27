@@ -27,3 +27,15 @@ export const normLoose = (s: string) =>
     .trim();
 
 export const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
+
+/**
+ * A document as proof: without the text ReplyIQ itself wrote into it, so ReplyIQ never cites its own words.
+ * Drops approved learnings blocks (<!-- replyiq:learnings:KEY --> ... <!-- /replyiq:learnings:KEY -->) and
+ * campaign-doc sections (<!-- replyiq:RUN:GROUP --> up to the next ReplyIQ marker or the end, as they are written).
+ */
+export const withoutOwnSections = (content: string) =>
+  content
+    .replace(/<!-- replyiq:learnings:(\S+) -->[\s\S]*?<!-- \/replyiq:learnings:\1 -->/g, "")
+    .replace(/<!-- replyiq:(?!learnings:)[^>]*-->[\s\S]*?(?=<!-- \/?replyiq:|$)/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();

@@ -97,6 +97,8 @@ describe("startRun", () => {
     const done = await getRunView(d, runId);
     expect(done.status).toBe("done");
     expect(done.job).toBeNull();
+    expect(Date.parse(done.finishedAt!)).toBeGreaterThanOrEqual(Date.parse(done.createdAt)); // drafts later move updatedAt, not this
+    expect(done.otherOrg).toBe(false);
     expect(done.source.name).toBe("[DEMO] Seq A");
     expect(done.groups.map((g) => g.key).sort()).toEqual(["pricing_request", "unsubscribe"]);
     // The view never ships full conversations.
@@ -179,6 +181,55 @@ describe("learnings and summaries", () => {
     expect(toApiError(await runLearnings(d, runId, { action: "nope" }).catch((e) => e)).status).toBe(400);
   });
 
+  it("won't propose over learnings that are saved in Studio (the record would stop matching Studio)", async () => {
+    const d = deps();
+    const { runId } = await startRun(d, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    const run = (await store.load(runId))!;
+    await store.save({ ...run, learnings: { status: "applied", proposedAt: run.createdAt, appliedAt: run.createdAt, proposals: [] } });
+    const err = await runLearnings(d, runId, { action: "propose" }).catch((e) => e);
+    expect(err).toMatchObject({ status: 409, code: "not_possible" });
+    expect(err.message).toMatch(/take them out first/);
+    expect((await store.load(runId))!.learnings!.status).toBe("applied");
+  });
+
+  it("saving a run's learnings marks an older run's block for the same campaign as replaced", async () => {
+    const d = deps();
+    const older = await startRun(d, { sequenceId: "seqA", writeTags: false }).then(async ({ runId }) => (await drain(), runId));
+    const newer = await startRun(d, { sequenceId: "seqA", writeTags: false }).then(async ({ runId }) => (await drain(), runId));
+    const proposal = { docId: "mh", docName: "Messaging House", kind: "messaging" as const, key: "seqA", section: "S", action: "append" as const };
+    const applied = { status: "applied" as const, proposedAt: "t", appliedAt: "t", proposals: [proposal] };
+    await store.save({ ...(await store.load(older))!, learnings: applied });
+    await store.save({ ...(await store.load(newer))!, learnings: { status: "proposed", proposedAt: "t", proposals: [proposal] } });
+    const studio = new Map([["mh", { id: "mh", displayName: "Messaging House", content: "Company text.", version: 3 }]]);
+    const g8 = fakeOrg({
+      getGlobalDoc: async (id: string) => ({ ...studio.get(id)! }),
+      updateGlobalDoc: async (id: string, content: string) => void studio.set(id, { ...studio.get(id)!, content, version: studio.get(id)!.version + 1 }),
+    });
+    expect((await runLearnings(deps(g8), newer, { action: "apply" })).status).toBe("applied");
+    expect((await store.load(older))!.learnings).toMatchObject({ status: "replaced", replacedBy: newer });
+    // The older run can no longer take out (or re-save) what is now the newer run's block.
+    for (const action of ["remove", "apply"]) expect(await runLearnings(deps(g8), older, { action }).catch((e) => e)).toMatchObject({ status: 409, code: "not_possible" });
+  });
+
+  it("a pipeline crash (the run can't be saved) marks the run failed instead of leaving it running", async () => {
+    const d = deps();
+    // The pipeline's final save fails (e.g. a Windows file lock that outlasts the retries).
+    const flaky: RunStore = {
+      ...store,
+      save: async (r) => {
+        if (r.status === "done") throw new Error("EPERM: operation not permitted, rename");
+        return store.save(r);
+      },
+    };
+    const { runId } = await startRun({ ...d, store: flaky }, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    const run = await getRunView(d, runId);
+    expect(run.status).toBe("failed");
+    expect(run.errors.join()).toMatch(/run stopped: .*EPERM/);
+    expect(run.job).toBeNull();
+  });
+
   it("summarises recent runs", async () => {
     const d = deps();
     await startRun(d, { sequenceId: "seqA", writeTags: false });
@@ -186,6 +237,42 @@ describe("learnings and summaries", () => {
     const [s] = await listRunSummaries(d);
     expect(s).toMatchObject({ status: "done", name: "[DEMO] Seq A", replies: 3, job: null });
     expect(s.draftable).toBe(1); // pricing (2 eligible); unsubscribe never
+  });
+});
+
+describe("runs saved with a key for another graph8 org", () => {
+  async function runIn(d: ServiceDeps, orgId: string) {
+    const { runId } = await startRun(d, { sequenceId: "seqA", writeTags: false });
+    await drain();
+    await store.save({ ...(await store.load(runId))!, orgId });
+    return runId;
+  }
+
+  it("can be read, but never drafted or used to change Studio, and leave the recent list", async () => {
+    const d = deps();
+    const runId = await runIn(d, "org_other");
+    const view = await getRunView(d, runId);
+    expect(view.otherOrg).toBe(true);
+    expect(view.groups.find((g) => g.key === "pricing_request")!.draftable).toMatchObject({ ok: false, reason: expect.stringMatching(/different graph8 org/) });
+    for (const action of ["create", "patch", "previews"]) expect((await startDraft(d, runId, "pricing_request", { action }).catch((e) => e)).code).toBe("other_org");
+    for (const action of ["propose", "apply", "remove"]) expect((await runLearnings(d, runId, { action }).catch((e) => e)).code).toBe("other_org");
+    expect(tasks).toHaveLength(0);
+    expect(await listRunSummaries(d)).toEqual([]);
+  });
+
+  it("hides nothing when graph8 can't say which org the key opens", async () => {
+    const d = deps();
+    await runIn(d, "org_other");
+    await runIn(d, "org_test");
+    const offline = deps(
+      fakeOrg({
+        writePolicy: async () => {
+          throw new Error("graph8 unreachable");
+        },
+      }),
+    );
+    expect(await listRunSummaries(offline)).toHaveLength(2);
+    expect(await listRunSummaries(d)).toHaveLength(1);
   });
 });
 

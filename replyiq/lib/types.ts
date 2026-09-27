@@ -160,10 +160,12 @@ export interface SequenceDraft {
 
 /** Suggested additions to company-wide Studio documents, applied only after a person approves. */
 export interface StudioLearnings {
-  status: "proposed" | "applied" | "removed" | "failed";
+  /** "replaced": a newer run of the same campaign saved its own block over this one. */
+  status: "proposed" | "applied" | "removed" | "failed" | "replaced";
   proposedAt: string;
   appliedAt?: string;
   removedAt?: string;
+  replacedBy?: string; // the run whose block Studio now holds
   proposals: {
     docId: string;
     docName: string;
@@ -188,6 +190,8 @@ export interface Run {
   id: string;
   createdAt: string;
   updatedAt: string;
+  /** When the pipeline ended (done or failed). Drafts and learnings later move updatedAt, not this. */
+  finishedAt?: string;
   status: RunStatus;
   orgId: string;
   /** What was analysed: a Studio campaign (all its sequences) or a single sequence. */
