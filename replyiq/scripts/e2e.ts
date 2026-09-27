@@ -18,7 +18,7 @@ import { runPipeline } from "../lib/pipeline/runPipeline";
 import { discoverSources, findCampaignDoc, pickDefaultSource, resolveSource } from "../lib/pipeline/sources";
 import { createFileStore } from "../lib/store";
 import { allowsFollowUpCampaign, CATEGORY_KEYS, isHardStop, REVIEW_THRESHOLD, TAG_PREFIX, tagNameOf } from "../lib/taxonomy";
-import { norm, normLoose, wordCount } from "../lib/text";
+import { norm, normLoose, withoutOwnSections, wordCount } from "../lib/text";
 import type { Category, Group, Run, SourceSummary } from "../lib/types";
 
 const arg = (flag: string) => {
@@ -157,13 +157,16 @@ async function cardProblems(run: Run, docs: Map<string, string>): Promise<{ prob
   return { problems: p, cards, proof, gaps };
 }
 
-/** The documents a run's cards were grounded on, re-read fresh from graph8. */
+/** The documents a run's cards were grounded on, re-read fresh from graph8, without ReplyIQ's own blocks. */
 async function groundingDocs(run: Run): Promise<Map<string, string>> {
   const client = g8();
   const out = new Map<string, string>();
   const ctx = await resolveSource(client, run.source.selector);
   for (const d of Object.values(ctx.docs)) if (d) out.set(d.id, d.content);
-  for (const d of await client.listGlobalDocs()) if (d.content) out.set(d.id, d.content);
+  for (const d of await client.listGlobalDocs()) {
+    const content = withoutOwnSections(d.content);
+    if (content) out.set(d.id, content);
+  }
   return out;
 }
 

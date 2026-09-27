@@ -313,6 +313,19 @@ describe("buildFollowupSequence", () => {
     expect(audit.POSITION).toMatch(/^Step 2: sent 4 days after step 1/);
   });
 
+  it("re-checks the Answer Card's proof: a point found only in ReplyIQ's own block of its document is left out", async () => {
+    const g = pricing();
+    const own = "Teams that switch see results within ninety days of moving over.";
+    g.card!.proofWeHave.push({ claim: "Fast results.", sourceDocId: "mh", sourceDocName: "Messaging House", excerpt: own, verified: true });
+    const { g8 } = fakeG8();
+    const listed = await g8.listGlobalDocs();
+    g8.listGlobalDocs = async () => [...listed, { id: "mh", displayName: "Messaging House", content: `Company text.\n<!-- replyiq:learnings:k -->\n${own}\n<!-- /replyiq:learnings:k -->` }];
+    const seq = await buildFollowupSequence(deps(g8, fakeLlm().llm), makeRun(g), g, draftOf());
+    expect(seq.facts.map((f) => f.claim)).not.toContain("Fast results");
+    expect(seq.facts[0].claim).toBe("Team plan price"); // the real proof stays
+    expect(seq.warnings.join(" ")).toMatch(/1 Answer Card proof point\(s\) left out/);
+  });
+
   it("drops suggested facts that are not verbatim, and can take facts from the original sequence's own copy", async () => {
     const g = pricing();
     const { g8 } = fakeG8();

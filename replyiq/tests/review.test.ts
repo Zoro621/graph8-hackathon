@@ -120,3 +120,23 @@ describe("E2E review fixes", () => {
     expect(docLabel("brand_new_doc")).toBe("brand new doc");
   });
 });
+
+describe("ReplyIQ never cites its own text", () => {
+  it("withoutOwnSections drops learnings blocks and campaign-doc sections, keeping the company's text", async () => {
+    const { withoutOwnSections } = await import("../lib/text");
+    const doc = [
+      "Company text before.",
+      "<!-- replyiq:learnings:camp-1 -->",
+      "## Heard in the field",
+      "ReplyIQ's words.",
+      "<!-- /replyiq:learnings:camp-1 -->",
+      "Company text after.",
+    ].join("\n");
+    expect(withoutOwnSections(doc)).toBe("Company text before.\n\nCompany text after.");
+    // Campaign-doc sections run from their marker to the next ReplyIQ marker or the end, as draftCampaign writes them.
+    const campaign = "Studio's objections.\n\n<!-- replyiq:run1:pricing_request -->\n## ReplyIQ Answer Card\nour card\n\n<!-- replyiq:run2:hard_no -->\nanother";
+    expect(withoutOwnSections(campaign)).toBe("Studio's objections.");
+    expect(withoutOwnSections("<!-- replyiq:run1:k -->\nonly ours")).toBe("");
+    expect(withoutOwnSections("No markers at all.")).toBe("No markers at all.");
+  });
+});

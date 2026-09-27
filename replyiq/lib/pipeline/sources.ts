@@ -3,6 +3,7 @@
 // Nothing here is tied to a specific campaign: everything comes from the API at runtime.
 import type { CampaignDocument, CampaignFull, G8Client, SequenceDetail, Thread } from "../g8";
 import { docText } from "../g8";
+import { withoutOwnSections } from "../text";
 import type { Reply, SourceSummary } from "../types";
 import { threadToReply } from "./fetchReplies";
 
@@ -129,7 +130,8 @@ export async function resolveSource(client: G8Client, sel: SourceSelector): Prom
   const docs: SourceContext["docs"] = {};
   for (const kind of Object.keys(DOC_MATCHERS) as CampaignDocKind[]) {
     const d = findCampaignDoc(campaign?.documents ?? [], kind);
-    if (d && docText(d)) docs[kind] = { id: d.id, name: d.display_name ?? d.name ?? kind, content: docText(d) };
+    const content = d ? withoutOwnSections(docText(d)) : "";
+    if (d && content) docs[kind] = { id: d.id, name: d.display_name ?? d.name ?? kind, content };
   }
   if (campaign && !docs.objections) warnings.push("no Messaging & Objections document found on the campaign");
 

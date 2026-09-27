@@ -22,7 +22,7 @@ import type { EmailDraftBody, G8Client, SequenceCreateBody, SequenceStepConfig }
 import { describeError, docText } from "../g8";
 import type { Llm } from "../llm";
 import { categoryInfo } from "../taxonomy";
-import { norm, normLoose, wordCount } from "../text";
+import { norm, normLoose, withoutOwnSections, wordCount } from "../text";
 import type { CampaignDraft, EmailCheck, EmailFact, Group, Run, SequenceDraft } from "../types";
 import { buildQuery } from "./cards";
 import { toPlainText } from "./fetchReplies";
@@ -371,14 +371,18 @@ export interface SequenceOptions {
 async function loadDocs(g8: SequenceClient, run: Run, warnings: string[]) {
   const docs: SourceDoc[] = [];
   try {
-    for (const d of await g8.listGlobalDocs()) if (d.content) docs.push({ id: d.id, name: d.displayName, kind: "global", content: d.content });
+    // Facts come from the company's text, never from blocks ReplyIQ itself wrote into these documents.
+    for (const d of await g8.listGlobalDocs()) {
+      const content = withoutOwnSections(d.content);
+      if (content) docs.push({ id: d.id, name: d.displayName, kind: "global", content });
+    }
   } catch (err) {
     warnings.push(`Studio documents unavailable (${describeError(err)})`);
   }
   if (run.source.campaignId) {
     try {
       for (const d of (await g8.getCampaignFull(run.source.campaignId)).documents ?? []) {
-        const content = docText(d);
+        const content = withoutOwnSections(docText(d));
         if (content) docs.push({ id: d.id, name: `Campaign: ${d.display_name ?? d.name ?? d.file_type ?? d.id}`, kind: "campaign", content });
       }
     } catch (err) {
@@ -497,7 +501,15 @@ async function compose(deps: SequenceDeps, run: Run, group: Group, seq: Sequence
   for (const o of original.sources) docs.all.set(o.docId, o.text);
   const card = group.card;
   seq.doNotClaim = [card?.proofGap, ...(card?.unverifiedClaims ?? [])].filter((x): x is string => Boolean(x?.trim())).map(oneLine);
-  const cardFacts: EmailFact[] = (card?.proofWeHave ?? []).map((p) => ({ claim: oneLine(p.claim).replace(/[.;:,]+$/, ""), excerpt: oneLine(p.excerpt), source: p.sourceDocName }));
+  // The card's proof is re-checked against its document as it reads now, without ReplyIQ's own blocks: a card
+  // made before those blocks were ignored may cite them, and a document may have changed since the run.
+  const proof = card?.proofWeHave ?? [];
+  const stillProven = proof.filter((p) => {
+    const text = docs.all.get(p.sourceDocId);
+    return text !== undefined && normLoose(text).includes(normLoose(p.excerpt));
+  });
+  if (stillProven.length < proof.length) warnings.push(`${proof.length - stillProven.length} Answer Card proof point(s) left out: no longer found in the company's own text of their document`);
+  const cardFacts: EmailFact[] = stillProven.map((p) => ({ claim: oneLine(p.claim).replace(/[.;:,]+$/, ""), excerpt: oneLine(p.excerpt), source: p.sourceDocName }));
 
   // Where more facts may come from: the original sequence's copy, then the best document passages for this group.
   const sources: WriterSource[] = [
