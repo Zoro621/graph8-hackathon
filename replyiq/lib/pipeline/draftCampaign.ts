@@ -481,12 +481,16 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
     const pollMs = deps.pollMs ?? 5_000;
     const started = Date.now();
     let docs: CampaignDocument[] = [];
+    // Studio creates the document rows one by one: right after creation the list can hold only `sequence` and
+    // `step_catalog`, both already finished. "Done" therefore also needs the documents ReplyIQ owns to exist.
+    const owned: ("objections" | "replyTemplates" | "brief")[] = ["objections", "replyTemplates", "brief"];
     for (;;) {
       docs = await deps.g8.listCampaignDocs(draft.campaignId!);
-      const done = docs.length > 0 && docs.every(isTerminal);
+      const ownedPresent = owned.every((k) => findCampaignDoc(docs, k));
+      const done = docs.length > 0 && ownedPresent && docs.every(isTerminal);
       draft.generation = done ? "complete" : "in_progress";
       if (done || Date.now() - started >= timeoutMs) break;
-      log(`  waiting for Studio documents: ${docs.filter(isTerminal).length}/${docs.length} finished (${docs.filter(isFailed).length} failed)`);
+      log(`  waiting for Studio documents: ${docs.filter(isTerminal).length}/${docs.length} finished (${docs.filter(isFailed).length} failed)${ownedPresent ? "" : ", some not created yet"}`);
       await sleep(pollMs);
     }
     draft.docsFailed = docs.filter(isFailed).map((d) => d.file_type ?? d.display_name ?? d.id);
@@ -503,7 +507,10 @@ export async function draftCampaign(deps: DraftDeps, opts: DraftOptions): Promis
     for (const { kind, render } of targets) {
       const meta = findCampaignDoc(docs, kind);
       if (!meta) {
-        if (kind !== "brief") draft.warnings.push(`campaign has no ${kind === "objections" ? "Messaging & Objections" : "Reply Templates"} document`);
+        // Studio has not created the row yet (it does so during generation): patch it later, like a generating one.
+        const label = kind === "objections" ? "messaging_objections" : kind === "replyTemplates" ? "reply_templates" : "campaign_brief";
+        if (draft.generation !== "complete") draft.docsPending.push(label);
+        else if (kind !== "brief") draft.warnings.push(`campaign has no ${docLabel(label)} document`);
         continue;
       }
       const label = meta.file_type ?? kind;

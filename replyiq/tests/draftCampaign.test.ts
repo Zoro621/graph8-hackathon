@@ -223,6 +223,42 @@ describe("draftCampaign", () => {
     expect(d2.campaignId).toBe("camp-1");
   });
 
+  it("waits for Studio to create the documents ReplyIQ owns: an early list with only sequence + step_catalog is not 'done'", async () => {
+    await store.save(makeRun([pricing()]));
+    const { g8, log, docContent } = fakeG8({
+      docs: [
+        // right after creation graph8 lists only the two finished rows; the rest do not exist yet
+        [{ id: "s", file_type: "sequence", status: "completed" }, { id: "k", file_type: "step_catalog", status: "completed" }],
+        [
+          { id: "s", file_type: "sequence", status: "completed" },
+          { id: "k", file_type: "step_catalog", status: "completed" },
+          { id: "o", file_type: "messaging_objections", status: "failed" },
+          { id: "r", file_type: "reply_templates", status: "failed" },
+          { id: "b", file_type: "campaign_brief", status: "failed" },
+        ],
+      ],
+    });
+    docContent.set("o", "");
+    docContent.set("r", "");
+    const d = await draftCampaign(deps(g8), { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(log.polls).toBeGreaterThanOrEqual(2); // kept waiting past the early list
+    expect(d.generation).toBe("complete");
+    expect(d.docsPatched.sort()).toEqual(["campaign_brief", "messaging_objections", "reply_templates"]);
+    expect(d.docsPending).toEqual([]);
+    expect(d.warnings.join()).not.toMatch(/campaign has no/);
+  });
+
+  it("documents Studio has still not created when the wait runs out are pending, not 'missing'", async () => {
+    await store.save(makeRun([pricing()]));
+    const { g8 } = fakeG8({ docs: [[{ id: "s", file_type: "sequence", status: "completed" }]] });
+    const d = await draftCampaign({ ...deps(g8), timeoutMs: 0 }, { runId: "abcdefghijkl", groupKey: "pricing_request" });
+    expect(d.status).toBe("ready");
+    expect(d.generation).toBe("in_progress");
+    expect(d.docsPending.sort()).toEqual(["campaign_brief", "messaging_objections", "reply_templates"]);
+    expect(d.warnings.join()).toMatch(/still writing/);
+    expect(d.warnings.join()).not.toMatch(/campaign has no/);
+  });
+
   it("re-running never duplicates: same campaign, marker-guarded docs", async () => {
     await store.save(makeRun([pricing()]));
     const { g8, log } = fakeG8();
